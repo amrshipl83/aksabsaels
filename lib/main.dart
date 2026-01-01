@@ -4,7 +4,9 @@ import 'firebase_options.dart';
 
 // استيراد الشاشات
 import 'screens/auth/login_screen.dart';
-import 'screens/rep/sales_rep_home_screen.dart'; // الشاشة التي صممناها للتو
+import 'screens/auth/register_screen.dart'; // أضف هذا السطر
+import 'screens/rep/sales_rep_home_screen.dart';
+import 'screens/rep/visit_screen.dart'; // أضف هذا السطر
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,9 +25,8 @@ class AksabSalesApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Aksab Sales App',
-      debugShowCheckedModeBanner: false, // إخفاء علامة Debug
-      
-      // إعدادات اللغة والاتجاه
+      debugShowCheckedModeBanner: false,
+
       builder: (context, child) {
         return Directionality(
           textDirection: TextDirection.rtl,
@@ -35,19 +36,19 @@ class AksabSalesApp extends StatelessWidget {
 
       theme: ThemeData(
         primarySwatch: Colors.orange,
-        fontFamily: 'Cairo', 
+        fontFamily: 'Cairo', // تأكد من إضافة الخط في pubspec.yaml
         useMaterial3: true,
-        // تخصيص اللون البرتقالي كثيم أساسي
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFF57C00)),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF43B97F)), // جعلنا اللون الأساسي أخضر ليتماشى مع الهوية
       ),
 
-      // تعريف المسارات (Routes) لتسهيل التنقل
       initialRoute: '/',
       routes: {
         '/': (context) => const LoginScreen(),
-        '/rep_home': (context) => const SalesRepHomeScreen(),
-        // سنضيف هنا شاشات المدير والزيارات لاحقاً
+        '/register': (context) => const RegisterScreen(), // مسار التسجيل
+        '/rep_home': (context) => const SalesRepHomeScreen(), // مسار المندوب
+        '/visits': (context) => const VisitScreen(), // مسار الزيارات
       },
     );
   }
 }
+

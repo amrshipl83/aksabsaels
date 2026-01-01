@@ -4,11 +4,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
-// ----------------------------------------------------------------------
-// تعريف الألوان والثوابت
-// ----------------------------------------------------------------------
-const Color kPrimaryColor = Color(0xFFF57C00); // اللون البرتقالي
-const Color kSecondaryColor = Color(0xFF1A2C3D); // لون النص الداكن
+// استيراد شاشة التسجيل لاستخدامها في الزر السفلي
+import 'register_screen.dart'; 
+
+const Color kPrimaryColor = Color(0xFF43B97F); // غيرناه للأخضر ليتماشى مع الهوية الجديدة
+const Color kSecondaryColor = Color(0xFF1A2C3D);
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -19,12 +19,11 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController(); // تم تغيير الاسم ليكون أوضح
   final _passwordController = TextEditingController();
   String? _errorMessage;
   bool _isLoading = false;
 
-  // دالة مساعدة لمعالجة كائنات Timestamp قبل التشفير للحفظ في SharedPreferences
   dynamic _encoder(dynamic item) {
     if (item is Timestamp) {
       return item.toDate().toIso8601String();
@@ -33,46 +32,52 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    final email = _emailController.text.trim();
+    // --- المنطق الذكي للتحويل ---
+    String input = _phoneController.text.trim();
+    String smartEmail;
+    
+    // إذا كان المدخل أرقام فقط (رقم هاتف)، نحوله للإيميل الذكي
+    if (RegExp(r'^[0-9]+$').hasMatch(input)) {
+      smartEmail = "$input@aksab.com";
+    } else {
+      smartEmail = input; // لو أدخل إيميل كامل يدوياً (للمدراء مثلاً)
+    }
+    
     final password = _passwordController.text.trim();
 
     try {
-      // 1. تسجيل الدخول عبر Firebase Auth
+      // 1. تسجيل الدخول بالهوية المولدة
       final userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: email,
+        email: smartEmail,
         password: password,
       );
       final user = userCredential.user;
 
-      if (user == null) {
-        throw FirebaseAuthException(code: 'user-null');
-      }
+      if (user == null) throw FirebaseAuthException(code: 'user-null');
 
       DocumentSnapshot? userDocSnapshot;
       String? userRole;
 
-      // 2. البحث في مجموعة المناديب (salesRep)
+      // 2. البحث في المناديب المعتمدين (salesRep)
       final salesRepQuery = await FirebaseFirestore.instance
           .collection('salesRep')
           .where('uid', isEqualTo: user.uid)
           .limit(1)
           .get();
-      
+
       if (salesRepQuery.docs.isNotEmpty) {
         userDocSnapshot = salesRepQuery.docs.first;
         userRole = (userDocSnapshot.data() as Map<String, dynamic>?)?['role']?.toString() ?? 'sales_rep';
       }
 
-      // 3. البحث في مجموعة المدراء (managers) إذا لم يوجد في المناديب
+      // 3. البحث في المدراء المعتمدين (managers)
       if (userDocSnapshot == null) {
         final managersQuery = await FirebaseFirestore.instance
             .collection('managers')
@@ -86,28 +91,22 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
 
-      // 4. التحقق من وجود البيانات ومن حالة الحساب
+      // 4. التحقق من الحالة والحفظ
       if (userDocSnapshot != null && userRole != null) {
         final userDocData = userDocSnapshot.data() as Map<String, dynamic>;
         final status = userDocData['status']?.toString();
-        
+
         if (status == 'approved') {
-          // حفظ البيانات محلياً
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('userData', json.encode(userDocData, toEncodable: _encoder));
           await prefs.setString('userRole', userRole);
 
           if (mounted) {
-            // التوجيه بناءً على الدور
             if (userRole == 'sales_rep') {
-              // التوجه لشاشة المندوب الرئيسية (المسار المعرف في main.dart)
               Navigator.of(context).pushReplacementNamed('/rep_home');
             } else if (userRole == 'sales_supervisor' || userRole == 'sales_manager') {
-              // TODO: توجيه لشاشة المدير عند الانتهاء منها
-              _showError('✅ تم الدخول كمدير، شاشة الإدارة قيد التطوير.');
-            } else {
-              await FirebaseAuth.instance.signOut();
-              _showError('❌ دور المستخدم غير مدعوم حالياً.');
+              // حالياً نوجههم لنفس الصفحة أو صفحة مدير إذا كانت جاهزة
+              _showError('✅ تم الدخول كمدير/مشرف، جاري تحويلك...');
             }
           }
         } else {
@@ -116,31 +115,19 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } else {
         await FirebaseAuth.instance.signOut();
-        _showError('❌ بيانات المستخدم غير موجودة في قاعدة بيانات المبيعات.');
+        _showError('❌ بياناتك لم تنقل بعد للكشوف المعتمدة.');
       }
     } on FirebaseAuthException catch (e) {
-      String message;
-      if (e.code == 'wrong-password' || e.code == 'user-not-found' || e.code == 'invalid-credential') {
-        message = 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
-      } else if (e.code == 'invalid-email') {
-        message = 'صيغة البريد الإلكتروني غير صالحة.';
-      } else {
-        message = 'حدث خطأ أثناء تسجيل الدخول. حاول مجدداً.';
-      }
-      _showError('❌ $message');
+      _showError('❌ رقم الهاتف أو كلمة المرور غير صحيحة.');
     } catch (e) {
       _showError('❌ خطأ غير متوقع: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _showError(String message) {
-    if (mounted) {
-      setState(() => _errorMessage = message);
-    }
+    if (mounted) setState(() => _errorMessage = message);
   }
 
   @override
@@ -163,46 +150,28 @@ class _LoginScreenState extends State<LoginScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 20,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
+                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20)],
               ),
               child: Form(
                 key: _formKey,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.login, color: kSecondaryColor),
-                        const SizedBox(width: 8),
-                        Text(
-                          'تسجيل الدخول',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: kSecondaryColor,
-                          ),
-                        ),
-                      ],
-                    ),
+                    const Icon(Icons.lock_person, size: 60, color: kPrimaryColor),
+                    const SizedBox(height: 10),
+                    const Text('أكسب للمبيعات', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kSecondaryColor)),
                     const SizedBox(height: 30),
                     _buildTextFormField(
-                      controller: _emailController,
-                      label: 'البريد الإلكتروني',
-                      icon: Icons.email,
-                      keyboardType: TextInputType.emailAddress,
+                      controller: _phoneController,
+                      label: 'رقم الهاتف',
+                      icon: Icons.phone_android,
+                      keyboardType: TextInputType.phone,
                     ),
                     const SizedBox(height: 20),
                     _buildTextFormField(
                       controller: _passwordController,
                       label: 'كلمة المرور',
-                      icon: Icons.lock,
+                      icon: Icons.lock_outline,
                       isPassword: true,
                     ),
                     const SizedBox(height: 30),
@@ -212,17 +181,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: _isLoading ? null : _login,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: kPrimaryColor,
-                          foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          elevation: 5,
                         ),
                         child: _isLoading
-                            ? const SizedBox(
-                                height: 20, width: 20,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                              )
-                            : const Text('تسجيل الدخول', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                            ? const CircularProgressIndicator(color: Colors.white)
+                            : const Text('دخول', style: TextStyle(fontSize: 18, color: Colors.white)),
                       ),
                     ),
                     if (_errorMessage != null)
@@ -233,9 +197,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 20),
                     TextButton(
                       onPressed: () {
-                        // TODO: Navigator.pushNamed(context, '/register');
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen()));
                       },
-                      child: const Text('تسجيل حساب جديد', style: TextStyle(color: kPrimaryColor, fontWeight: FontWeight.bold)),
+                      child: const Text('ليس لديك حساب؟ سجل الآن', style: TextStyle(color: kPrimaryColor, fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -247,13 +211,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildTextFormField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    TextInputType keyboardType = TextInputType.text,
-    bool isPassword = false,
-  }) {
+  Widget _buildTextFormField({required TextEditingController controller, required String label, required IconData icon, TextInputType keyboardType = TextInputType.text, bool isPassword = false}) {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
@@ -263,9 +221,9 @@ class _LoginScreenState extends State<LoginScreen> {
         labelText: label,
         prefixIcon: Icon(icon, color: kPrimaryColor),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
       ),
-      validator: (value) => (value == null || value.isEmpty) ? 'يجب إدخال $label' : null,
+      validator: (v) => (v == null || v.isEmpty) ? 'مطلوب' : null,
     );
   }
 }
+

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
 import 'sales_rep_dashboard.dart';
+import 'visit_screen.dart'; // استيراد شاشة الزيارات
 
 // --- الثوابت اللونية ---
 const Color kPrimaryColor = Color(0xFF3498db);
@@ -110,7 +111,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         backgroundColor: kBgColor,
-        // القائمة الجانبية (ثلاث شرط)
         drawer: _buildMainDrawer(),
         appBar: AppBar(
           title: const Text('لوحة المندوب', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -137,7 +137,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                   const SizedBox(height: 20),
                   _buildActionButtons(),
                   const SizedBox(height: 15),
-                  
+
                   if (_isDayOpen && currentDayStartTime != null)
                     SalesRepDashboard(
                       repCode: repData!['repCode'],
@@ -146,7 +146,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                     )
                   else if (!_isLoading)
                     _buildEmptyState(),
-                    
+
                   if (_isLoading)
                     const Padding(
                       padding: EdgeInsets.only(top: 40),
@@ -173,19 +173,41 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                 backgroundColor: kPrimaryColor,
                 child: Icon(Icons.person, color: Colors.white, size: 40),
               ),
-              accountName: Text(repData?['fullname'] ?? 'مندوب المبيعات', 
+              accountName: Text(repData?['fullname'] ?? 'مندوب المبيعات',
                   style: const TextStyle(fontWeight: FontWeight.bold)),
               accountEmail: Text('الكود: ${repData?['repCode'] ?? '...'}'),
             ),
-            _drawerItem(Icons.dashboard_outlined, "الرئيسية", true),
+            _drawerItem(Icons.dashboard_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
             _drawerItem(Icons.shopping_bag_outlined, "المتجر", false),
             _drawerItem(Icons.track_changes_outlined, "الأهداف", false),
             _drawerItem(Icons.people_outline, "عملائي", false),
-            _drawerItem(Icons.location_on_outlined, "الزيارات", false),
+            
+            // ربط أيقونة الزيارات
+            _drawerItem(
+              Icons.location_on_outlined, 
+              "الزيارات", 
+              false,
+              onTap: () {
+                Navigator.pop(context);
+                if (_isDayOpen) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const VisitScreen()),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("❌ يجب بدء يوم العمل أولاً لتسجيل الزيارات")),
+                  );
+                }
+              }
+            ),
+
             const Spacer(),
             const Divider(color: Colors.white24),
             _drawerItem(Icons.logout, "خروج", false, color: Colors.redAccent, onTap: () async {
               await FirebaseAuth.instance.signOut();
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.clear(); // مسح البيانات عند الخروج
               if (mounted) Navigator.of(context).pushReplacementNamed('/');
             }),
             const SizedBox(height: 20),
@@ -228,7 +250,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
       child: ElevatedButton.icon(
         onPressed: _isLoading ? null : (_isDayOpen ? _endDay : _startDay),
         icon: Icon(_isDayOpen ? Icons.stop_circle_outlined : Icons.play_circle_outline),
-        label: Text(_isDayOpen ? "إنهاء يوم العمل" : "بدء يوم العمل", 
+        label: Text(_isDayOpen ? "إنهاء يوم العمل" : "بدء يوم العمل",
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         style: ElevatedButton.styleFrom(
           backgroundColor: _isDayOpen ? kErrorColor : kSuccessColor,
@@ -242,7 +264,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
 
   Widget _buildEmptyState() {
     return Padding(
-      padding: const EdgeInsets.only(top: 60), // التصحيح هنا
+      padding: const EdgeInsets.only(top: 60),
       child: Column(
         children: [
           Icon(Icons.event_busy_outlined, size: 80, color: Colors.grey.shade400),
@@ -255,3 +277,4 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     );
   }
 }
+
