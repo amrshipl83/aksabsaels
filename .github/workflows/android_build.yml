@@ -1,39 +1,36 @@
-name: Flutter Android Build
-
+name: Build Flutter APK                              
 on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
-
+      - master                                       
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
+      - name: 🧩 Checkout Code
+        uses: actions/checkout@v4
 
-      - name: set up JDK 11
+      # ☕️ إضافة الجافا ضرورية لأن مشروعك يستخدم Java 17
+      - name: ☕️ Setup Java
         uses: actions/setup-java@v4
         with:
-          java-version: '11'
-          distribution: 'temurin'
+          distribution: 'zulu'
+          java-version: '17'
 
-      - name: Set up Flutter
+      - name: 🔧 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          channel: stable
 
-      - name: Get dependencies
+      - name: 📦 Install Dependencies
         run: flutter pub get
 
-      - name: Build APK
-        run: flutter build apk --debug
+      - name: 🏗️ Build Release APK
+        run: flutter build apk --release             
 
-      - name: Upload APK
+      - name: 📤 Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: app-release
+          path: build/app/outputs/flutter-apk/app-release.apk

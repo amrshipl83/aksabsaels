@@ -1,35 +1,55 @@
-name: aksabsales
-description: "A new Flutter project."
-# The following line prevents the package from being accidentally published to
-# pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' 
-
+name: aksab_driver
+description: "A new Flutter project for Aksab Drivers."
+publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.10.3
+  sdk: '>=3.2.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
 
-  cupertino_icons: ^1.0.8
+  # Firebase Core
+  firebase_core: ^3.1.1
+  firebase_auth: ^5.1.2
+  cloud_firestore: ^5.0.2
+  firebase_messaging: ^15.0.3
 
-  # =========================================================
-  # 🎯 المكتبات الضرورية لصفحة تسجيل الدخول (Firebase + Local Storage)
-  # =========================================================
-  firebase_core: ^3.2.0        # لإدارة وإعداد تطبيق Firebase
-  firebase_auth: ^5.1.4         # للمصادقة وتسجيل الدخول
-  cloud_firestore: ^5.1.0       # للبحث عن دور المستخدم وحالته
-  shared_preferences: ^2.2.3    # لحفظ بيانات المستخدم ودوره محلياً
-  # =========================================================
+  # UI & Design Tools
+  sizer: ^3.1.3
+  font_awesome_flutter: ^10.7.0
+  intl: ^0.20.2
+  google_fonts: ^6.1.0
+  cached_network_image: ^3.3.1
+  image_picker: ^1.0.7
+  lucide_icons: ^0.257.0
+
+  # Location & Maps (ضروري جداً للمندوب)
+  geolocator: ^12.0.0 # تم تثبيته على نسخة مستقرة لحل مشكلة الـ Build
+  geocoding: ^3.0.0
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  url_launcher: ^6.3.2
+
+  # Utilities & State
+  provider: ^6.1.2
+  shared_preferences: ^2.5.3
+  permission_handler: ^12.0.1
+  share_plus: ^10.1.4
+  path_provider: ^2.1.3
+  http: ^1.6.0
+  fl_chart: ^1.1.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  flutter_lints: ^6.0.0
+  flutter_lints: ^4.0.0
 
 flutter:
-
   uses-material-design: true
+  assets:
+    - assets/
+    - assets/OSMB-bc319d822a17aa9ad1089fc05e7d4e752460f877.geojson
