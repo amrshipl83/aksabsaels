@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:convert';
-import 'add_new_customer.dart'; // استيراد صفحة إضافة العميل
+import 'add_new_customer.dart';
 
 class VisitScreen extends StatefulWidget {
   const VisitScreen({super.key});
@@ -39,11 +39,9 @@ class _VisitScreenState extends State<VisitScreen> {
       return;
     }
 
-    // تصحيح قراءة الـ JSON
     _userData = jsonDecode(userDataString);
     final repCode = _userData!['repCode'];
 
-    // 1. التحقق من فتح يوم العمل
     final logQuery = await FirebaseFirestore.instance
         .collection('daily_logs')
         .where('repCode', isEqualTo: repCode)
@@ -56,7 +54,6 @@ class _VisitScreenState extends State<VisitScreen> {
       return;
     }
 
-    // 2. التحقق من وجود زيارة معلقة
     _currentVisitId = prefs.getString('currentVisitId');
     _currentCustomerName = prefs.getString('currentCustomerName');
 
@@ -75,7 +72,7 @@ class _VisitScreenState extends State<VisitScreen> {
       final snap = await FirebaseFirestore.instance
           .collection('users')
           .where('repCode', isEqualTo: repCode)
-          .where('role', isEqualTo: 'buyer') // جلب المشترين فقط
+          .where('role', isEqualTo: 'buyer')
           .get();
 
       setState(() {
@@ -87,18 +84,51 @@ class _VisitScreenState extends State<VisitScreen> {
     }
   }
 
+  // دالة جلب الموقع مع طلب الإذن (تم تحسينها لتتوافق مع منطق الـ GPS)
+  Future<Position?> _getCurrentLocation() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("❌ يرجى تفعيل خدمة الموقع (GPS)")),
+      );
+      return null;
+    }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("❌ تم رفض إذن الموقع")),
+        );
+        return null;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("❌ إذن الموقع مرفوض نهائياً من الإعدادات")),
+      );
+      return null;
+    }
+
+    return await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+  }
+
   Future<void> _startVisit() async {
     if (_selectedCustomerId == null) return;
 
     setState(() => _isLoading = true);
 
-    Position? position;
-    try {
-      position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-    } catch (e) {
-      debugPrint("Location error: $e");
-    }
-
+    // جلب الموقع قبل بدء الزيارة
+    Position? position = await _getCurrentLocation();
+    
+    // إذا لم يتمكن من جلب الموقع، نعطي خياراً للمندوب (أو نمنعه حسب رغبتك)
+    // هنا سنكمل الزيارة حتى لو الموقع فارغ لكن سنحاول جلبه أولاً
+    
     final customer = _customers.firstWhere((doc) => doc.id == _selectedCustomerId);
     final customerName = customer['fullname'];
 
@@ -109,7 +139,7 @@ class _VisitScreenState extends State<VisitScreen> {
       'customerName': customerName,
       'startTime': FieldValue.serverTimestamp(),
       'status': "in_progress",
-      'location': position != null 
+      'location': position != null
           ? {'lat': position.latitude, 'lng': position.longitude}
           : null,
     };
@@ -151,7 +181,6 @@ class _VisitScreenState extends State<VisitScreen> {
       _notesController.clear();
       _isLoading = false;
     });
-
     _loadCustomers(_userData!['repCode']);
   }
 
@@ -205,18 +234,13 @@ class _VisitScreenState extends State<VisitScreen> {
             minimumSize: const Size(double.infinity, 55),
           ),
         ),
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 20),
-          child: Divider(),
-        ),
-        // زر تسجيل عميل جديد - الربط المطلوب
+        const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Divider()),
         ElevatedButton.icon(
           onPressed: () async {
             await Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const AddNewCustomerScreen()),
             );
-            // تحديث القائمة بعد العودة في حال أضاف عميلاً جديداً
             _loadCustomers(_userData!['repCode']);
           },
           icon: const Icon(Icons.person_add),
@@ -243,8 +267,8 @@ class _VisitScreenState extends State<VisitScreen> {
               const Icon(Icons.store, color: Colors.blue),
               const SizedBox(width: 10),
               Expanded(
-                child: Text("أنت الآن في زيارة لـ: $_currentCustomerName", 
-                  style: const TextStyle(fontSize: 16, color: Colors.blue, fontWeight: FontWeight.bold)),
+                child: Text("أنت الآن في زيارة لـ: $_currentCustomerName",
+                    style: const TextStyle(fontSize: 16, color: Colors.blue, fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -265,7 +289,7 @@ class _VisitScreenState extends State<VisitScreen> {
           controller: _notesController,
           maxLines: 4,
           decoration: const InputDecoration(
-            border: OutlineInputBorder(), 
+            border: OutlineInputBorder(),
             labelText: "ملاحظات وتفاصيل الزيارة",
             alignLabelWithHint: true,
           ),
