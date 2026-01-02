@@ -15,10 +15,10 @@ class AddNewCustomerScreen extends StatefulWidget {
 class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _phoneController = TextEditingController(); // سنستخدم الهاتف بدلاً من الإيميل
+  final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _addressController = TextEditingController();
-  
+
   bool _isLoading = false;
   Position? _currentPosition;
   Map<String, dynamic>? _repData;
@@ -27,10 +27,9 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
   void initState() {
     super.initState();
     _loadRepData();
-    _determinePosition();
+    _determinePosition(); // محاولة جلب الموقع عند فتح الشاشة
   }
 
-  // تحميل بيانات المندوب المسجلة
   Future<void> _loadRepData() async {
     final prefs = await SharedPreferences.getInstance();
     final data = prefs.getString('userData');
@@ -39,24 +38,66 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
     }
   }
 
-  // جلب الموقع الجغرافي (بديل Mapbox في الواجهة)
+  // دالة طلب الإذن وجلب الموقع (المحسنة)
   Future<void> _determinePosition() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    // 1. فحص هل خدمة الـ GPS مفعلة في الهاتف
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("❌ يرجى تفعيل خدمة الموقع (GPS) في الهاتف")),
+        );
+      }
+      return;
+    }
+
+    // 2. فحص وطلب إذن التطبيق
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("❌ تم رفض إذن الوصول للموقع")),
+          );
+        }
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("❌ إذن الموقع مرفوض نهائياً، يرجى تفعيله من الإعدادات")),
+        );
+      }
+      return;
+    }
+
+    // 3. جلب الإحداثيات
+    setState(() => _isLoading = true);
     try {
       Position position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
+        desiredAccuracy: LocationAccuracy.high,
+      );
       setState(() {
         _currentPosition = position;
-        _addressController.text = "تم تحديد الموقع: ${position.latitude}, ${position.longitude}";
+        _addressController.text = "موقع دقيق: ${position.latitude.toStringAsFixed(5)}, ${position.longitude.toStringAsFixed(5)}";
+        _isLoading = false;
       });
     } catch (e) {
-      debugPrint("خطأ في جلب الموقع: $e");
+      setState(() => _isLoading = false);
+      debugPrint("Error location: $e");
     }
   }
 
   Future<void> _registerCustomer() async {
     if (!_formKey.currentState!.validate() || _currentPosition == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("يرجى ملء البيانات وتفعيل الموقع")),
+        const SnackBar(content: Text("يرجى ملء البيانات وتحديث الموقع أولاً")),
       );
       return;
     }
@@ -64,22 +105,23 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // المنطق الذكي: تحويل رقم الهاتف إلى بريد إلكتروني
       String phone = _phoneController.text.trim();
-      String smartEmail = "$phone@aksab.com";
+      // استخدام الدومين المتوافق مع تطبيق الزبائن
+      String smartEmail = "$phone@aswaq.com"; 
       String password = _passwordController.text.trim();
 
-      // 1. إنشاء حساب في Firebase Auth
+      // --- الخطوة الأولى: إنشاء حساب المصادقة (Firebase Auth) ---
       UserCredential userCredential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(email: smartEmail, password: password);
 
       String userId = userCredential.user!.uid;
 
-      // 2. حفظ البيانات في Firestore (مجموعة users)
+      // --- الخطوة الثانية: حفظ المستند في Firestore بنفس الـ UID ---
       await FirebaseFirestore.instance.collection('users').doc(userId).set({
+        'uid': userId,
         'fullname': _nameController.text.trim(),
         'email': smartEmail,
-        'phone': phone, // حفظ الرقم الأصلي للرجوع إليه
+        'phone': phone,
         'address': _addressController.text.trim(),
         'location': {
           'lat': _currentPosition!.latitude,
@@ -91,19 +133,26 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
         'isVerified': true,
         'repCode': _repData?['repCode'],
         'repName': _repData?['fullname'],
+        'status': 'active',
       });
 
-      // 3. العودة بعد النجاح
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("✅ تم تسجيل العميل بنجاح")),
+          const SnackBar(content: Text("✅ تم تسجيل العميل بنجاح وارتباطه بالمصادقة")),
         );
-        Navigator.pop(context); // العودة لشاشة الزيارات أو الرئيسية
+        Navigator.pop(context);
       }
     } on FirebaseAuthException catch (e) {
       String msg = "حدث خطأ في التسجيل";
-      if (e.code == 'email-already-in-use') msg = "هذا الرقم مسجل مسبقاً";
+      if (e.code == 'email-already-in-use') msg = "هذا الرقم (البريد) مسجل بالفعل";
+      if (e.code == 'weak-password') msg = "كلمة المرور ضعيفة جداً";
+      
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } catch (e) {
+      debugPrint("Store Error: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("❌ حدث خطأ غير متوقع أثناء الحفظ")),
+      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -112,26 +161,32 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("تسجيل عميل جديد")),
+      appBar: AppBar(
+        title: const Text("تسجيل عميل جديد", style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: const Color(0xFF43B97F),
+        foregroundColor: Colors.white,
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Form(
           key: _formKey,
           child: Column(
             children: [
-              _buildInput(_nameController, "اسم المحل / العميل", Icons.store),
+              _buildInput(_nameController, "اسم المحل / التاجر", Icons.store),
               const SizedBox(height: 15),
-              _buildInput(_phoneController, "رقم الهاتف (سيكون هو اسم المستخدم)", Icons.phone, keyboard: TextInputType.phone),
+              _buildInput(_phoneController, "رقم الهاتف (اسم المستخدم)", Icons.phone, keyboard: TextInputType.phone),
               const SizedBox(height: 15),
               _buildInput(_passwordController, "كلمة مرور العميل", Icons.lock, isPass: true),
               const SizedBox(height: 15),
-              _buildInput(_addressController, "العنوان", Icons.location_on, readOnly: true),
+              _buildInput(_addressController, "تحديد الموقع", Icons.location_on, readOnly: true),
               const SizedBox(height: 10),
+              
               TextButton.icon(
-                onPressed: _determinePosition,
-                icon: const Icon(Icons.my_location),
-                label: const Text("تحديث الموقع الجغرافي"),
+                onPressed: _isLoading ? null : _determinePosition,
+                icon: const Icon(Icons.my_location, color: Color(0xFF43B97F)),
+                label: const Text("تحديث الإحداثيات الجغرافية", style: TextStyle(color: Color(0xFF43B97F))),
               ),
+              
               const SizedBox(height: 30),
               SizedBox(
                 width: double.infinity,
@@ -139,11 +194,12 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
                   onPressed: _isLoading ? null : _registerCustomer,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF43B97F),
-                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   child: _isLoading 
                     ? const CircularProgressIndicator(color: Colors.white) 
-                    : const Text("تسجيل العميل في النظام", style: TextStyle(fontSize: 18, color: Colors.white)),
+                    : const Text("حفظ وتفعيل حساب العميل", style: TextStyle(fontSize: 18, color: Colors.white)),
                 ),
               ),
             ],
@@ -164,6 +220,8 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
         labelText: label,
         prefixIcon: Icon(icon, color: const Color(0xFF43B97F)),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        filled: readOnly,
+        fillColor: readOnly ? Colors.grey[100] : null,
       ),
       validator: (v) => (v == null || v.isEmpty) ? "هذا الحقل مطلوب" : null,
     );
