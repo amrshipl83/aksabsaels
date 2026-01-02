@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:sizer/sizer.dart'; // مكتبة تنسيق الأحجام
+import 'package:sizer/sizer.dart'; 
 import 'firebase_options.dart';
 
 // استيراد الشاشات
@@ -10,11 +10,11 @@ import 'screens/rep/sales_rep_home_screen.dart';
 import 'screens/rep/visit_screen.dart';
 import 'screens/rep/add_new_customer.dart';
 import 'screens/admin/sales_management_dashboard.dart';
-import 'screens/admin/live_monitoring_screen.dart'; // 🛑 إضافة استيراد صفحة المتابعة اللحظية
+import 'screens/admin/live_monitoring_screen.dart';
+import 'screens/admin/manage_users_screen.dart'; // 🛑 استيراد شاشة الإدارة الجديدة
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
@@ -26,7 +26,6 @@ class AksabSalesApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // نغلف التطبيق بـ Sizer لدعم القياسات المتجاوبة في الصفحات الجديدة
     return Sizer(
       builder: (context, orientation, deviceType) {
         return MaterialApp(
@@ -58,10 +57,11 @@ class AksabSalesApp extends StatelessWidget {
             '/rep_home': (context) => const SalesRepHomeScreen(),
             '/visits': (context) => const VisitScreen(),
             '/add_customer': (context) => const AddNewCustomerScreen(),
-            
-            // --- مسارات الإدارة ---
+
+            // --- مسارات الإدارة (Admin Routes) ---
             '/admin_dashboard': (context) => const SalesManagementDashboard(),
-            '/live_monitoring': (context) => const LiveMonitoringScreen(), // 🛑 إضافة مسار صفحة اللايف
+            '/live_monitoring': (context) => const LiveMonitoringScreen(),
+            '/manage_users': (context) => const ManageUsersScreen(), // 🛑 المسار الجديد للمندوبين والمشرفين
           },
         );
       },

@@ -55,7 +55,6 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     if (managerDocId.isEmpty) return;
 
     try {
-      // 1. جلب عدد المندوبين
       Query agentsQuery = FirebaseFirestore.instance.collection('salesRep');
       if (role == 'sales_supervisor') {
         agentsQuery = agentsQuery.where('supervisorId', isEqualTo: managerDocId);
@@ -63,7 +62,6 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       final agentsSnap = await agentsQuery.get();
       totalAgents = agentsSnap.size;
 
-      // 2. المبيعات والطلبات
       Query ordersQuery = FirebaseFirestore.instance.collection('orders');
       if (role == 'sales_supervisor' && agentsSnap.docs.isNotEmpty) {
         List<String> repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
@@ -104,6 +102,10 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       return Scaffold(body: Center(child: Text("خطأ: $_errorMsg", style: const TextStyle(color: Colors.red))));
     }
 
+    // تحديد اسم أيقونة الموظفين بناءً على الدور
+    String role = _userData?['role'] ?? '';
+    String staffManagementTitle = (role == 'sales_manager') ? "المندوبين والمشرفين" : "المندوبين";
+
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
@@ -120,7 +122,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             );
           }),
         ),
-        drawer: _buildDrawer(),
+        drawer: _buildDrawer(staffManagementTitle),
         body: SingleChildScrollView(
           padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 2.h),
           child: Column(
@@ -142,12 +144,11 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
                 ],
               ),
               SizedBox(height: 4.h),
-              _buildQuickAction(Icons.file_copy, "تقارير اليوم", () {
-                // سيتم ربطها لاحقاً
-              }),
-              // الربط الأول: تتبع المندوبين من الشاشة الرئيسية
               _buildQuickAction(Icons.sensors, "تتبع المندوبين لايف", () {
                 Navigator.pushNamed(context, '/live_monitoring');
+              }),
+              _buildQuickAction(Icons.manage_accounts, staffManagementTitle, () {
+                Navigator.pushNamed(context, '/manage_users');
               }),
             ],
           ),
@@ -208,7 +209,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     );
   }
 
-  Widget _buildDrawer() {
+  Widget _buildDrawer(String staffTitle) {
     return Drawer(
       child: Container(
         color: kSidebarColor,
@@ -221,7 +222,15 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               child: ListView(
                 children: [
                   _drawerItem(Icons.dashboard, "الرئيسية", true, onTap: () => Navigator.pop(context)),
-                  // الربط الثاني: تتبع المندوبين من القائمة الجانبية
+                  _drawerItem(Icons.receipt_long, "تقارير الطلبات", false),
+                  _drawerItem(Icons.people, "العملاء", false),
+                  _drawerItem(Icons.manage_accounts, staffTitle, false, onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushNamed(context, '/manage_users');
+                  }),
+                  _drawerItem(Icons.pie_chart, "التقارير الشاملة", false),
+                  _drawerItem(Icons.percent, "عروض الشهر", false),
+                  _drawerItem(Icons.location_on, "تقارير الزيارات", false),
                   _drawerItem(Icons.sensors, "لايف - المتابعة اللحظية", false, onTap: () {
                     Navigator.pop(context);
                     Navigator.pushNamed(context, '/live_monitoring');
