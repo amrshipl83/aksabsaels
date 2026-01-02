@@ -32,23 +32,29 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   }
 
   Future<void> _initDashboard() async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString('userData');
-    if (data != null) {
-      _userData = jsonDecode(data);
-      await _loadStats();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final data = prefs.getString('userData');
+      if (data != null) {
+        _userData = jsonDecode(data);
+        await _loadStats();
+      }
+    } catch (e) {
+      debugPrint("Init Error: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-    if (mounted) setState(() => _isLoading = false);
   }
 
   Future<void> _loadStats() async {
+    if (_userData == null) return;
+    
     String role = _userData?['role'] ?? '';
-    String managerDocId = _userData!['uid'];
+    String managerDocId = _userData?['uid'] ?? '';
 
     try {
       Query agentsQuery = FirebaseFirestore.instance.collection('salesRep');
       if (role == 'sales_supervisor') {
-        // تصحيح: استخدام isEqualTo كـ Named Argument
         agentsQuery = agentsQuery.where('supervisorId', isEqualTo: managerDocId);
       }
       final agentsSnap = await agentsQuery.get();
@@ -57,7 +63,6 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       Query ordersQuery = FirebaseFirestore.instance.collection('orders');
       if (role == 'sales_supervisor' && agentsSnap.docs.isNotEmpty) {
         List<String> repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
-        // تصحيح: استخدام whereIn كـ Named Argument
         ordersQuery = ordersQuery.where('buyer.repCode', whereIn: repCodes);
       }
 
@@ -83,13 +88,19 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
         });
       }
     } catch (e) {
-      debugPrint("Error: $e");
+      debugPrint("Firestore Error: $e");
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    // نستخدم Scaffold بسيط أثناء التحميل لضمان عدم ظهور شاشة بيضاء فارغة
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: kBgColor,
+        body: const Center(child: CircularProgressIndicator(color: Color(0xFF1ABC9C))),
+      );
+    }
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -104,21 +115,28 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
           foregroundColor: kSidebarColor,
           elevation: 0.5,
           centerTitle: true,
+          // إضافة زر القائمة يدوياً للتأكد من ظهوره
+          leading: Builder(
+            builder: (context) => IconButton(
+              icon: Icon(Icons.menu, size: 24.sp),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            ),
+          ),
         ),
         drawer: _buildDrawer(),
         body: SingleChildScrollView(
-          padding: EdgeInsets.all(16.dp),
+          padding: EdgeInsets.all(15.sp), // استخدام sp بدلاً من dp للاتساق
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildWelcomeSection(),
-              SizedBox(height: 25.dp),
+              SizedBox(height: 20.sp),
               GridView.count(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 crossAxisCount: 2,
-                crossAxisSpacing: 12.dp,
-                mainAxisSpacing: 12.dp,
+                crossAxisSpacing: 15.sp,
+                mainAxisSpacing: 15.sp,
                 childAspectRatio: 1.1,
                 children: [
                   _buildStatCard("إجمالي الطلبات", "$totalOrders", Icons.shopping_basket, Colors.blue),
@@ -127,9 +145,9 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
                   _buildStatCard("متوسط التقييم", avgRating.toStringAsFixed(1), Icons.star, Colors.amber),
                 ],
               ),
-              SizedBox(height: 30.dp),
+              SizedBox(height: 25.sp),
               Text("الإجراءات السريعة", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
-              SizedBox(height: 15.dp),
+              SizedBox(height: 15.sp),
               _buildQuickAction(Icons.file_copy, "عرض تقارير اليوم", () {}),
               _buildQuickAction(Icons.map, "تتبع المندوبين لايف", () {}),
             ],
@@ -141,7 +159,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Widget _buildWelcomeSection() {
     return Container(
-      padding: EdgeInsets.all(18.dp),
+      padding: EdgeInsets.all(15.sp),
       decoration: BoxDecoration(
         color: kSidebarColor,
         borderRadius: BorderRadius.circular(15),
@@ -149,18 +167,18 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       child: Row(
         children: [
           CircleAvatar(
-            radius: 25.dp,
+            radius: 25.sp,
             backgroundColor: kPrimaryColor,
-            child: Icon(Icons.admin_panel_settings, color: Colors.white, size: 28.dp),
+            child: Icon(Icons.admin_panel_settings, color: Colors.white, size: 28.sp),
           ),
-          SizedBox(width: 15.dp),
+          SizedBox(width: 15.sp),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text("مرحباً بك،", style: TextStyle(color: Colors.white70, fontSize: 14.sp)),
                 Text(
-                  "${_userData?['fullname']}",
+                  "${_userData?['fullname'] ?? 'مدير النظام'}",
                   style: TextStyle(color: Colors.white, fontSize: 18.sp, fontWeight: FontWeight.bold),
                 ),
               ],
@@ -173,7 +191,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Widget _buildStatCard(String title, String value, IconData icon, Color color) {
     return Container(
-      padding: EdgeInsets.all(10.dp),
+      padding: EdgeInsets.all(8.sp),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
@@ -183,8 +201,8 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(icon, color: color, size: 30.sp),
-          SizedBox(height: 10.dp),
-          Text(title, style: TextStyle(color: Colors.grey[700], fontSize: 13.sp), textAlign: TextAlign.center),
+          SizedBox(height: 8.sp),
+          Text(title, style: TextStyle(color: Colors.grey[700], fontSize: 12.sp), textAlign: TextAlign.center),
           FittedBox(
             child: Text(
               value,
@@ -198,14 +216,14 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Widget _buildQuickAction(IconData icon, String title, VoidCallback onTap) {
     return Card(
-      margin: EdgeInsets.only(bottom: 12.dp),
+      margin: EdgeInsets.only(bottom: 12.sp),
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
-        contentPadding: EdgeInsets.symmetric(horizontal: 20.dp, vertical: 8.dp),
-        leading: Icon(icon, color: kPrimaryColor, size: 28.sp),
+        contentPadding: EdgeInsets.symmetric(horizontal: 15.sp, vertical: 5.sp),
+        leading: Icon(icon, color: kPrimaryColor, size: 25.sp),
         title: Text(title, style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w500)),
-        trailing: Icon(Icons.arrow_forward_ios, size: 18.sp, color: Colors.grey),
+        trailing: Icon(Icons.arrow_forward_ios, size: 15.sp, color: Colors.grey),
         onTap: onTap,
       ),
     );
@@ -218,9 +236,9 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
         child: SafeArea(
           child: Column(
             children: [
-              SizedBox(height: 30.dp),
+              SizedBox(height: 20.sp),
               Text("أكسب - إدارة المبيعات", style: TextStyle(color: kPrimaryColor, fontSize: 20.sp, fontWeight: FontWeight.bold)),
-              SizedBox(height: 20.dp),
+              SizedBox(height: 20.sp),
               const Divider(color: Colors.white24, thickness: 1),
               Expanded(
                 child: ListView(
@@ -239,10 +257,11 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               const Divider(color: Colors.white24),
               _drawerItem(Icons.logout, "تسجيل الخروج", false, color: Colors.redAccent, onTap: () async {
                 await FirebaseAuth.instance.signOut();
-                (await SharedPreferences.getInstance()).clear();
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.clear();
                 if (mounted) Navigator.of(context).pushReplacementNamed('/');
               }),
-              SizedBox(height: 15.dp),
+              SizedBox(height: 15.sp),
             ],
           ),
         ),
@@ -253,13 +272,13 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   Widget _drawerItem(IconData icon, String title, bool isSelected, {Color? color, bool isLive = false, VoidCallback? onTap}) {
     return ListTile(
       onTap: onTap ?? () => Navigator.pop(context),
-      leading: Icon(icon, color: color ?? (isSelected ? kPrimaryColor : Colors.white70), size: 22.sp),
+      leading: Icon(icon, color: color ?? (isSelected ? kPrimaryColor : Colors.white70), size: 20.sp),
       title: Row(
         children: [
           Text(title, style: TextStyle(color: color ?? Colors.white, fontSize: 15.sp)),
           if (isLive) ...[
-            SizedBox(width: 10.dp),
-            Container(width: 10.dp, height: 10.dp, decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle)),
+            SizedBox(width: 10.sp),
+            Container(width: 8.sp, height: 8.sp, decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle)),
           ]
         ],
       ),
