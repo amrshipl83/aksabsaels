@@ -5,12 +5,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'register_screen.dart';
 
-const Color kPrimaryColor = Color(0xFF43B97F); 
+const Color kPrimaryColor = Color(0xFF43B97F);
 const Color kSecondaryColor = Color(0xFF1A2C3D);
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
-
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
@@ -59,7 +58,6 @@ class _LoginScreenState extends State<LoginScreen> {
       _isLoading = true;
       _errorMessage = null;
     });
-
     String input = _phoneController.text.trim();
     String smartEmail = input.contains('@') ? input : "$input@aksab.com";
     final password = _passwordController.text.trim();
@@ -80,7 +78,8 @@ class _LoginScreenState extends State<LoginScreen> {
       final salesRepQuery = await FirebaseFirestore.instance
           .collection('salesRep')
           .where('uid', isEqualTo: user.uid)
-          .limit(1).get();
+          .limit(1)
+          .get();
 
       if (salesRepQuery.docs.isNotEmpty) {
         userDocSnapshot = salesRepQuery.docs.first;
@@ -92,8 +91,8 @@ class _LoginScreenState extends State<LoginScreen> {
         final managersQuery = await FirebaseFirestore.instance
             .collection('managers')
             .where('uid', isEqualTo: user.uid)
-            .limit(1).get();
-
+            .limit(1)
+            .get();
         if (managersQuery.docs.isNotEmpty) {
           userDocSnapshot = managersQuery.docs.first;
           userRole = userDocSnapshot.get('role')?.toString();
@@ -102,9 +101,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (userDocSnapshot != null && userRole != null) {
         final userDocData = userDocSnapshot.data() as Map<String, dynamic>;
+
+        // 🛑 دمج التعديل المطلوب: تخزين معرف الوثيقة ونسيان الـ uid في التعاملات اللاحقة
+        userDocData['docId'] = userDocSnapshot.id;
+
         if (userDocData['status'] == 'approved') {
           final prefs = await SharedPreferences.getInstance();
-          // حفظ البيانات لفتح التطبيق تلقائياً المرة القادمة
+          // حفظ البيانات لفتح التطبيق تلقائياً المرة القادمة (مع الـ docId الجديد)
           await prefs.setString('userData', json.encode(userDocData, toEncodable: _encoder));
           await prefs.setString('userRole', userRole);
 
