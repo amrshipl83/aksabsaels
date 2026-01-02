@@ -3,11 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'register_screen.dart';
 
-// استيراد شاشة التسجيل لاستخدامها في الزر السفلي
-import 'register_screen.dart'; 
-
-const Color kPrimaryColor = Color(0xFF43B97F); // غيرناه للأخضر ليتماشى مع الهوية الجديدة
+const Color kPrimaryColor = Color(0xFF43B97F); 
 const Color kSecondaryColor = Color(0xFF1A2C3D);
 
 class LoginScreen extends StatefulWidget {
@@ -19,41 +17,54 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _phoneController = TextEditingController(); // تم تغيير الاسم ليكون أوضح
+  final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   String? _errorMessage;
-  bool _isLoading = false;
+  bool _isLoading = true; // نبدأ بـ true حتى ينتهي الفحص التلقائي
+
+  @override
+  void initState() {
+    super.initState();
+    _checkExistingLogin(); // فحص إذا كان المستخدم مسجلاً مسبقاً
+  }
+
+  // --- وظيفة الفحص التلقائي عند فتح التطبيق ---
+  Future<void> _checkExistingLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? userRole = prefs.getString('userRole');
+    final String? userData = prefs.getString('userData');
+
+    if (userRole != null && userData != null) {
+      // توجيه المستخدم فوراً بناءً على دوره المخزن
+      if (mounted) {
+        if (userRole == 'sales_rep') {
+          Navigator.of(context).pushReplacementNamed('/rep_home');
+        } else if (userRole == 'sales_supervisor' || userRole == 'sales_manager') {
+          Navigator.of(context).pushReplacementNamed('/admin_dashboard');
+        }
+      }
+    } else {
+      setState(() => _isLoading = false); // إظهار واجهة الدخول إذا لم يوجد مستخدم
+    }
+  }
 
   dynamic _encoder(dynamic item) {
-    if (item is Timestamp) {
-      return item.toDate().toIso8601String();
-    }
+    if (item is Timestamp) return item.toDate().toIso8601String();
     return item;
   }
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
-
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    // --- المنطق الذكي للتحويل ---
     String input = _phoneController.text.trim();
-    String smartEmail;
-    
-    // إذا كان المدخل أرقام فقط (رقم هاتف)، نحوله للإيميل الذكي
-    if (RegExp(r'^[0-9]+$').hasMatch(input)) {
-      smartEmail = "$input@aksab.com";
-    } else {
-      smartEmail = input; // لو أدخل إيميل كامل يدوياً (للمدراء مثلاً)
-    }
-    
+    String smartEmail = input.contains('@') ? input : "$input@aksab.com";
     final password = _passwordController.text.trim();
 
     try {
-      // 1. تسجيل الدخول بالهوية المولدة
       final userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: smartEmail,
         password: password,
@@ -65,48 +76,43 @@ class _LoginScreenState extends State<LoginScreen> {
       DocumentSnapshot? userDocSnapshot;
       String? userRole;
 
-      // 2. البحث في المناديب المعتمدين (salesRep)
+      // البحث في المناديب
       final salesRepQuery = await FirebaseFirestore.instance
           .collection('salesRep')
           .where('uid', isEqualTo: user.uid)
-          .limit(1)
-          .get();
+          .limit(1).get();
 
       if (salesRepQuery.docs.isNotEmpty) {
         userDocSnapshot = salesRepQuery.docs.first;
-        userRole = (userDocSnapshot.data() as Map<String, dynamic>?)?['role']?.toString() ?? 'sales_rep';
+        userRole = 'sales_rep';
       }
 
-      // 3. البحث في المدراء المعتمدين (managers)
+      // البحث في المدراء/المشرفين إذا لم يجد مندوب
       if (userDocSnapshot == null) {
         final managersQuery = await FirebaseFirestore.instance
             .collection('managers')
             .where('uid', isEqualTo: user.uid)
-            .limit(1)
-            .get();
+            .limit(1).get();
 
         if (managersQuery.docs.isNotEmpty) {
           userDocSnapshot = managersQuery.docs.first;
-          userRole = (userDocSnapshot.data() as Map<String, dynamic>?)?['role']?.toString();
+          userRole = userDocSnapshot.get('role')?.toString();
         }
       }
 
-      // 4. التحقق من الحالة والحفظ
       if (userDocSnapshot != null && userRole != null) {
         final userDocData = userDocSnapshot.data() as Map<String, dynamic>;
-        final status = userDocData['status']?.toString();
-
-        if (status == 'approved') {
+        if (userDocData['status'] == 'approved') {
           final prefs = await SharedPreferences.getInstance();
+          // حفظ البيانات لفتح التطبيق تلقائياً المرة القادمة
           await prefs.setString('userData', json.encode(userDocData, toEncodable: _encoder));
           await prefs.setString('userRole', userRole);
 
           if (mounted) {
             if (userRole == 'sales_rep') {
               Navigator.of(context).pushReplacementNamed('/rep_home');
-            } else if (userRole == 'sales_supervisor' || userRole == 'sales_manager') {
-              // حالياً نوجههم لنفس الصفحة أو صفحة مدير إذا كانت جاهزة
-              _showError('✅ تم الدخول كمدير/مشرف، جاري تحويلك...');
+            } else {
+              Navigator.of(context).pushReplacementNamed('/admin_dashboard');
             }
           }
         } else {
@@ -115,12 +121,12 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } else {
         await FirebaseAuth.instance.signOut();
-        _showError('❌ بياناتك لم تنقل بعد للكشوف المعتمدة.');
+        _showError('❌ بياناتك غير موجودة في الكشوف المعتمدة.');
       }
-    } on FirebaseAuthException catch (e) {
+    } on FirebaseAuthException {
       _showError('❌ رقم الهاتف أو كلمة المرور غير صحيحة.');
     } catch (e) {
-      _showError('❌ خطأ غير متوقع: ${e.toString()}');
+      _showError('❌ خطأ: ${e.toString()}');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -132,6 +138,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // إذا كان جاري التحميل (أو الفحص التلقائي) تظهر شاشة بيضاء أو لوغو
+    if (_isLoading && _phoneController.text.isEmpty) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator(color: kPrimaryColor)));
+    }
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -150,7 +161,7 @@ class _LoginScreenState extends State<LoginScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(20),
-                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20)],
+                boxShadow: [const BoxShadow(color: Colors.black12, blurRadius: 20)],
               ),
               child: Form(
                 key: _formKey,
