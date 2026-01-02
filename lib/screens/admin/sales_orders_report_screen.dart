@@ -15,7 +15,7 @@ class SalesOrdersReportScreen extends StatefulWidget {
 class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
-  List<String> _targetRepCodes = []; 
+  List<String> _targetRepCodes = [];
 
   @override
   void initState() {
@@ -40,7 +40,6 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
 
     try {
       if (role == 'sales_manager') {
-        // جلب المشرفين التابعين للمدير
         var supervisors = await FirebaseFirestore.instance
             .collection('managers')
             .where('managerId', isEqualTo: myDocId)
@@ -49,7 +48,6 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
         List<String> supervisorIds = supervisors.docs.map((d) => d.id).toList();
 
         if (supervisorIds.isNotEmpty) {
-          // جلب المناديب التابعين للمشرفين
           var reps = await FirebaseFirestore.instance
               .collection('salesRep')
               .where('supervisorId', whereIn: supervisorIds)
@@ -57,7 +55,6 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
           codes = reps.docs.map((d) => d['repCode'] as String).toList();
         }
       } else if (role == 'sales_supervisor') {
-        // المشرف يجيب مناديبه مباشرة بمفتاح docId
         var reps = await FirebaseFirestore.instance
             .collection('salesRep')
             .where('supervisorId', isEqualTo: myDocId)
@@ -65,7 +62,7 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
         codes = reps.docs.map((d) => d['repCode'] as String).toList();
       }
 
-      setState(() => _targetRepCodes = codes);
+      if (mounted) setState(() => _targetRepCodes = codes);
     } catch (e) {
       debugPrint("Error Building Sales Hierarchy: $e");
     }
@@ -75,20 +72,20 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   Widget build(BuildContext context) {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF5F6FA),
-        appBar: AppBar(
-          title: Text("تقرير الطلبات", style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.white,
-          foregroundColor: const Color(0xFF2F3542),
-          elevation: 0.5,
-        ),
-        body: _targetRepCodes.isEmpty 
-            ? _emptyState() 
-            : _buildOrdersStream(),
+    // تم حذف Directionality لضمان نجاح الـ Build واعتماداً على main.dart
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: AppBar(
+        title: Text("تقرير الطلبات", 
+          style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF2F3542),
+        elevation: 0.5,
+        centerTitle: true,
       ),
+      body: _targetRepCodes.isEmpty 
+          ? _emptyState() 
+          : _buildOrdersStream(),
     );
   }
 
@@ -99,7 +96,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
         children: [
           Icon(Icons.inventory_2_outlined, size: 50.sp, color: Colors.grey),
           SizedBox(height: 10.sp),
-          Text("لا توجد طلبات لعرضها حالياً", style: TextStyle(fontSize: 14.sp, color: Colors.grey)),
+          Text("لا توجد طلبات لعرضها حالياً", 
+            style: TextStyle(fontSize: 14.sp, color: Colors.grey)),
         ],
       ),
     );
@@ -113,7 +111,7 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
           .orderBy('orderDate', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return Center(child: Text("حدث خطأ في جلب الطلبات"));
+        if (snapshot.hasError) return const Center(child: Text("حدث خطأ في جلب الطلبات"));
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
         var orders = snapshot.data!.docs;
@@ -141,8 +139,10 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
           backgroundColor: const Color(0xFF1ABC9C).withOpacity(0.1),
           child: Icon(Icons.shopping_cart, color: const Color(0xFF1ABC9C), size: 18.sp),
         ),
-        title: Text(buyer?['name'] ?? 'بدون اسم', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp)),
-        subtitle: Text("القيمة: ${order['total']} ج.م", style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
+        title: Text(buyer?['name'] ?? 'بدون اسم', 
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp)),
+        subtitle: Text("القيمة: ${order['total']} ج.م", 
+          style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
         children: [
           Padding(
             padding: EdgeInsets.all(12.sp),
@@ -154,7 +154,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
                 _infoRow(Icons.location_on, "العنوان", buyer?['address'] ?? '-'),
                 _infoRow(Icons.person_outline, "المندوب", buyer?['repName'] ?? '-'),
                 const Divider(),
-                Text("الأصناف:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.sp)),
+                Text("الأصناف:", 
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.sp)),
                 ...((order['items'] as List? ?? []).map((item) => ListTile(
                   dense: true,
                   title: Text(item['productName'] ?? ''),
@@ -176,7 +177,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
           Icon(icon, size: 12.sp, color: Colors.grey),
           SizedBox(width: 5.sp),
           Text("$label: ", style: TextStyle(color: Colors.grey[600], fontSize: 11.sp)),
-          Expanded(child: Text(value, style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.w500))),
+          Expanded(child: Text(value, 
+            style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.w500))),
         ],
       ),
     );
