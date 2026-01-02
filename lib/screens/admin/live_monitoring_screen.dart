@@ -56,45 +56,72 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
 
   Widget _buildLiveStream() {
     String role = _userData?['role'] ?? '';
-    String uid = _userData?['uid'] ?? '';
+    String myDocId = _userData?['docId'] ?? ''; 
 
+    if (role == 'sales_supervisor') {
+      // المشرف يرى مناديبه مباشرة
+      return _buildRepsWatcher(
+        FirebaseFirestore.instance.collection('salesRep')
+            .where('supervisorId', isEqualTo: myDocId)
+      );
+    } else if (role == 'sales_manager') {
+      // المدير يرى مناديب المشرفين التابعين له
+      return StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('managers')
+            .where('managerId', isEqualTo: myDocId)
+            .where('role', isEqualTo: 'sales_supervisor')
+            .snapshots(),
+        builder: (context, supervisorSnap) {
+          if (supervisorSnap.hasError) return const Center(child: Text("خطأ في تحميل المشرفين"));
+          if (!supervisorSnap.hasData) return const Center(child: CircularProgressIndicator());
+          
+          List<String> supervisorIds = supervisorSnap.data!.docs.map((doc) => doc.id).toList();
+          
+          if (supervisorIds.isEmpty) {
+            return Center(child: Text("لا يوجد مشرفين تابعين لك حالياً", style: TextStyle(fontSize: 14.sp)));
+          }
+
+          // جلب المناديب التابعين لهؤلاء المشرفين
+          return _buildRepsWatcher(
+            FirebaseFirestore.instance.collection('salesRep')
+                .where('supervisorId', whereIn: supervisorIds)
+          );
+        },
+      );
+    }
+    return const Center(child: Text("غير مسموح لهذا الدور بالعرض"));
+  }
+
+  // دالة وسيطة لجلب المناديب ثم جلب سجلاتهم اليومية النشطة
+  Widget _buildRepsWatcher(Query repsQuery) {
     return StreamBuilder<QuerySnapshot>(
-      // أولاً: جلب المندوبين التابعين بناءً على الدور
-      stream: FirebaseFirestore.instance.collection('salesRep').snapshots(),
+      stream: repsQuery.snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) return const Center(child: Text("حدث خطأ في جلب المندوبين"));
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-        // تصفية المندوبين برمجياً بناءً على الصلاحيات
-        List<DocumentSnapshot> filteredReps = snapshot.data!.docs.where((doc) {
-          var data = doc.data() as Map<String, dynamic>;
-          if (role == 'sales_supervisor') {
-            return data['supervisorId'] == uid; // المشرف يرى مندوبيه فقط
-          }
-          // المدير يرى الكل حالياً (ويمكن تخصيصها لاحقاً بناءً على قائمة المشرفين)
-          return true; 
-        }).toList();
-
-        if (filteredReps.isEmpty) {
-          return Center(child: Text("لا يوجد مندوبين تابعين لك حالياً", style: TextStyle(fontSize: 14.sp)));
+        var repsDocs = snapshot.data!.docs;
+        if (repsDocs.isEmpty) {
+          return Center(child: Text("لا يوجد مندوبين في فريقك", style: TextStyle(fontSize: 14.sp)));
         }
 
-        List<String> repCodes = filteredReps.map((doc) => doc['repCode'] as String).toList();
+        List<String> repCodes = repsDocs.map((doc) => doc['repCode'] as String).toList();
 
-        // ثانياً: جلب سجلات اليوم المفتوحة لهؤلاء المندوبين فقط
+        // جلب سجلات اليوم المفتوحة فقط لهؤلاء المناديب
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection('daily_logs')
               .where('status', isEqualTo: 'open')
               .where('repCode', whereIn: repCodes)
-          .snapshots(),
+              .snapshots(),
           builder: (context, logSnapshot) {
+            if (logSnapshot.hasError) return const Center(child: Text("خطأ في جلب حالة العمل"));
             if (!logSnapshot.hasData) return const Center(child: CircularProgressIndicator());
 
             var activeLogs = logSnapshot.data!.docs;
-
             if (activeLogs.isEmpty) {
-              return Center(child: Text("لا يوجد مندوبون في يوم عمل نشط حالياً", 
-                style: TextStyle(fontSize: 14.sp, color: Colors.grey)));
+              return Center(child: Text("لا يوجد مندوبون في يوم عمل نشط حالياً",
+                  style: TextStyle(fontSize: 14.sp, color: Colors.grey)));
             }
 
             return ListView.builder(
@@ -115,7 +142,6 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
     String repCode = logData['repCode'];
 
     return StreamBuilder<QuerySnapshot>(
-      // ثالثاً: جلب الزيارات الجارية لهذا المندوب
       stream: FirebaseFirestore.instance
           .collection('visits')
           .where('repCode', isEqualTo: repCode)
@@ -143,12 +169,12 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(logData['repName'] ?? 'مندوب', 
-                      style: TextStyle(color: Colors.white, fontSize: 16.sp, fontWeight: FontWeight.bold)),
+                    Text(logData['repName'] ?? 'مندوب',
+                        style: TextStyle(color: Colors.white, fontSize: 16.sp, fontWeight: FontWeight.bold)),
                     Container(
                       padding: EdgeInsets.symmetric(horizontal: 10.sp, vertical: 4.sp),
                       decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(5)),
-                      child: Text(inVisit ? "في زيارة حالياً" : "يوم عمل نشط", 
+                      child: Text(inVisit ? "في زيارة حالياً" : "يوم عمل نشط",
                         style: TextStyle(color: Colors.white, fontSize: 11.sp, fontWeight: FontWeight.bold)),
                     ),
                   ],
@@ -160,9 +186,9 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
                   children: [
                     _buildInfoRow(Icons.qr_code, "كود المندوب", repCode),
                     _buildInfoRow(Icons.access_time, "بدء اليوم", _formatTimestamp(logData['startTime'])),
-                    if (inVisit) ...[
+                    if (inVisit && currentVisit != null) ...[
                       const Divider(),
-                      _buildInfoRow(Icons.store, "العميل الحالي", currentVisit!['customerName'], color: kActiveVisitColor),
+                      _buildInfoRow(Icons.store, "العميل الحالي", currentVisit['customerName'] ?? 'غير معروف', color: kActiveVisitColor),
                       _buildInfoRow(Icons.timer, "بدء الزيارة", _formatTimestamp(currentVisit['startTime']), color: kActiveVisitColor),
                     ],
                   ],
@@ -191,8 +217,12 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
 
   String _formatTimestamp(dynamic timestamp) {
     if (timestamp == null) return "غير محدد";
-    DateTime dt = (timestamp as Timestamp).toDate();
-    return "${dt.hour}:${dt.minute.toString().padLeft(2, '0')}";
+    try {
+      DateTime dt = (timestamp as Timestamp).toDate();
+      return "${dt.hour}:${dt.minute.toString().padLeft(2, '0')}";
+    } catch (e) {
+      return "تنسيق غير صحيح";
+    }
   }
 }
 

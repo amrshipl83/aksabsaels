@@ -37,6 +37,12 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
   }
 
   @override
+  void dispose() {
+    _tabController?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (_userData == null || _tabController == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -65,24 +71,34 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
         body: TabBarView(
           controller: _tabController,
           children: isManager
-              ? [_buildUserList('managers', 'managerId'), _buildUserList('salesRep', 'managerId')]
-              : [_buildUserList('salesRep', 'supervisorId')],
+              ? [
+                  _buildUserList('managers', 'managerId'), // البحث عن مشرفين تابعين للمدير
+                  _buildUserList('salesRep', 'managerId')  // البحث عن مناديب تابعين للمدير
+                ]
+              : [
+                  _buildUserList('salesRep', 'supervisorId') // البحث عن مناديب تابعين للمشرف
+                ],
         ),
       ),
     );
   }
 
   Widget _buildUserList(String collectionName, String filterField) {
+    // 🛑 التعديل هنا: استخدام docId لضمان الربط الصحيح بالوثائق المربوطة
+    String myDocId = _userData?['docId'] ?? '';
+
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection(collectionName)
-          .where(filterField, isEqualTo: _userData?['uid'])
+          .where(filterField, isEqualTo: myDocId) // تم التغيير من uid إلى docId
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return const Center(child: Text("حدث خطأ ما"));
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-        var docs = snapshot.data!.docs;
+        var docs = snapshot.data?.docs ?? [];
         if (docs.isEmpty) return const Center(child: Text("لا توجد بيانات للعرض"));
 
         return ListView.builder(
@@ -128,7 +144,6 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                 Text(hasTarget ? "🎯 تم تعيين الهدف" : "⚠️ لم يتم تعيين هدف",
                     style: TextStyle(fontSize: 12.sp, color: hasTarget ? Colors.green : Colors.orange)),
                 ElevatedButton(
-                  // 🛑 التصحيح هنا: استخدام styleFrom بدلاً من fromStyleFrom
                   style: ElevatedButton.styleFrom(backgroundColor: kPrimaryColor),
                   onPressed: () => _showTargetModal(docId, data['fullname'], collection),
                   child: Text("تعيين هدف", style: TextStyle(color: Colors.white, fontSize: 11.sp)),
@@ -150,7 +165,12 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
           SizedBox(width: 5.sp),
           Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 12.sp)),
           SizedBox(width: 5.sp),
-          Text(value, style: TextStyle(color: kSidebarColor, fontWeight: FontWeight.w500, fontSize: 12.sp)),
+          Expanded(
+            child: Text(value, 
+              style: TextStyle(color: kSidebarColor, fontWeight: FontWeight.w500, fontSize: 12.sp),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ],
       ),
     );
@@ -183,7 +203,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                   'dateSet': DateTime.now().toIso8601String(),
                 }
               });
-              Navigator.pop(context);
+              if (mounted) Navigator.pop(context);
             },
             child: const Text("حفظ"),
           ),

@@ -51,44 +51,61 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Future<void> _loadStats() async {
     String role = _userData?['role'] ?? '';
-    String managerDocId = _userData?['uid'] ?? '';
+    
+    // 🛑 التعديل الجوهري: القراءة من docId المضمون بدلاً من uid
+    String managerDocId = _userData?['docId'] ?? ''; 
+    
     if (managerDocId.isEmpty) return;
 
     try {
       Query agentsQuery = FirebaseFirestore.instance.collection('salesRep');
+      
+      // تحديد البحث بناءً على الرتبة باستخدام المعرف الصحيح
       if (role == 'sales_supervisor') {
         agentsQuery = agentsQuery.where('supervisorId', isEqualTo: managerDocId);
+      } else if (role == 'sales_manager') {
+        agentsQuery = agentsQuery.where('ownerId', isEqualTo: managerDocId);
       }
+      
       final agentsSnap = await agentsQuery.get();
       totalAgents = agentsSnap.size;
 
-      Query ordersQuery = FirebaseFirestore.instance.collection('orders');
-      if (role == 'sales_supervisor' && agentsSnap.docs.isNotEmpty) {
+      if (agentsSnap.docs.isNotEmpty) {
         List<String> repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
-        ordersQuery = ordersQuery.where('buyer.repCode', whereIn: repCodes);
-      }
+        
+        // جلب الطلبات بناءً على أكواد المناديب التابعين
+        Query ordersQuery = FirebaseFirestore.instance.collection('orders')
+            .where('buyer.repCode', whereIn: repCodes);
+            
+        final ordersSnap = await ordersQuery.get();
+        double salesSum = 0;
+        double ratingSum = 0;
+        int ratedCount = 0;
 
-      final ordersSnap = await ordersQuery.get();
-      double salesSum = 0;
-      double ratingSum = 0;
-      int ratedCount = 0;
-
-      for (var doc in ordersSnap.docs) {
-        var d = doc.data() as Map<String, dynamic>;
-        salesSum += (d['total'] ?? 0).toDouble();
-        if (d['rating'] != null) {
-          ratingSum += (d['rating'] as num).toDouble();
-          ratedCount++;
+        for (var doc in ordersSnap.docs) {
+          var d = doc.data() as Map<String, dynamic>;
+          salesSum += (d['total'] ?? 0).toDouble();
+          if (d['rating'] != null) {
+            ratingSum += (d['rating'] as num).toDouble();
+            ratedCount++;
+          }
         }
-      }
 
-      setState(() {
-        totalOrders = ordersSnap.size;
-        totalSales = salesSum;
-        avgRating = ratedCount > 0 ? (ratingSum / ratedCount) : 0;
-      });
+        setState(() {
+          totalOrders = ordersSnap.size;
+          totalSales = salesSum;
+          avgRating = ratedCount > 0 ? (ratingSum / ratedCount) : 0;
+        });
+      } else {
+        // تصفير البيانات إذا لم يوجد مناديب مرتبطين
+        setState(() {
+          totalOrders = 0;
+          totalSales = 0;
+          avgRating = 0;
+        });
+      }
     } catch (e) {
-      print("Firestore Error: $e");
+      debugPrint("Firestore Error: $e");
     }
   }
 
@@ -102,7 +119,6 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       return Scaffold(body: Center(child: Text("خطأ: $_errorMsg", style: const TextStyle(color: Colors.red))));
     }
 
-    // تحديد اسم أيقونة الموظفين بناءً على الدور
     String role = _userData?['role'] ?? '';
     String staffManagementTitle = (role == 'sales_manager') ? "المندوبين والمشرفين" : "المندوبين";
 
@@ -182,7 +198,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4)],
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -239,7 +255,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
                   _drawerItem(Icons.logout, "تسجيل الخروج", false, color: Colors.redAccent, onTap: () async {
                     await FirebaseAuth.instance.signOut();
                     (await SharedPreferences.getInstance()).clear();
-                    Navigator.of(context).pushReplacementNamed('/');
+                    if (mounted) Navigator.of(context).pushReplacementNamed('/');
                   }),
                 ],
               ),
