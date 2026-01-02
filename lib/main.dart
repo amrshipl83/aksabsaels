@@ -9,7 +9,8 @@ import 'screens/auth/register_screen.dart';
 import 'screens/rep/sales_rep_home_screen.dart';
 import 'screens/rep/visit_screen.dart';
 import 'screens/rep/add_new_customer.dart';
-import 'screens/admin/sales_management_dashboard.dart'; // إضافة شاشة الإدارة الجديدة
+import 'screens/admin/sales_management_dashboard.dart';
+import 'screens/admin/live_monitoring_screen.dart'; // 🛑 إضافة استيراد صفحة المتابعة اللحظية
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -57,8 +58,10 @@ class AksabSalesApp extends StatelessWidget {
             '/rep_home': (context) => const SalesRepHomeScreen(),
             '/visits': (context) => const VisitScreen(),
             '/add_customer': (context) => const AddNewCustomerScreen(),
-            // --- المسار الجديد للإدارة ---
+            
+            // --- مسارات الإدارة ---
             '/admin_dashboard': (context) => const SalesManagementDashboard(),
+            '/live_monitoring': (context) => const LiveMonitoringScreen(), // 🛑 إضافة مسار صفحة اللايف
           },
         );
       },
