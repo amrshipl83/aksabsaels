@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:sizer/sizer.dart'; 
+import 'package:sizer/sizer.dart';
 import 'firebase_options.dart';
 
 // استيراد الشاشات
@@ -11,7 +11,9 @@ import 'screens/rep/visit_screen.dart';
 import 'screens/rep/add_new_customer.dart';
 import 'screens/admin/sales_management_dashboard.dart';
 import 'screens/admin/live_monitoring_screen.dart';
-import 'screens/admin/manage_users_screen.dart'; // 🛑 استيراد شاشة الإدارة الجديدة
+import 'screens/admin/manage_users_screen.dart';
+// 🛑 استيراد صفحة التقارير الجديدة
+import 'screens/admin/sales_orders_report_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,8 +33,6 @@ class AksabSalesApp extends StatelessWidget {
         return MaterialApp(
           title: 'Aksab Sales App',
           debugShowCheckedModeBanner: false,
-
-          // إعداد اتجاه اللغة للعربية بشكل افتراضي
           builder: (context, child) {
             return Directionality(
               textDirection: TextDirection.rtl,
@@ -49,7 +49,6 @@ class AksabSalesApp extends StatelessWidget {
             ),
           ),
 
-          // تعريف مسارات التنقل (Named Routes)
           initialRoute: '/',
           routes: {
             '/': (context) => const LoginScreen(),
@@ -61,7 +60,9 @@ class AksabSalesApp extends StatelessWidget {
             // --- مسارات الإدارة (Admin Routes) ---
             '/admin_dashboard': (context) => const SalesManagementDashboard(),
             '/live_monitoring': (context) => const LiveMonitoringScreen(),
-            '/manage_users': (context) => const ManageUsersScreen(), // 🛑 المسار الجديد للمندوبين والمشرفين
+            '/manage_users': (context) => const ManageUsersScreen(),
+            // 🛑 المسار الجديد لتقارير الطلبات
+            '/sales_report': (context) => const SalesOrdersReportScreen(),
           },
         );
       },

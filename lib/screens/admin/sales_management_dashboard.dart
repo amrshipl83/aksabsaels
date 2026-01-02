@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
+// استيراد الصفحة الجديدة 🛑
+import 'sales_orders_report_screen.dart';
 
 class SalesManagementDashboard extends StatefulWidget {
   const SalesManagementDashboard({super.key});
@@ -51,10 +53,8 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Future<void> _loadStats() async {
     String role = _userData?['role'] ?? '';
-    
-    // 🛑 التعديل الجوهري: القراءة من docId المضمون بدلاً من uid
-    String managerDocId = _userData?['docId'] ?? ''; 
-    
+    // القراءة من docId المضمون بدلاً من uid
+    String managerDocId = _userData?['docId'] ?? '';
     if (managerDocId.isEmpty) return;
 
     try {
@@ -66,13 +66,13 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       } else if (role == 'sales_manager') {
         agentsQuery = agentsQuery.where('ownerId', isEqualTo: managerDocId);
       }
-      
+
       final agentsSnap = await agentsQuery.get();
       totalAgents = agentsSnap.size;
 
       if (agentsSnap.docs.isNotEmpty) {
         List<String> repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
-        
+
         // جلب الطلبات بناءً على أكواد المناديب التابعين
         Query ordersQuery = FirebaseFirestore.instance.collection('orders')
             .where('buyer.repCode', whereIn: repCodes);
@@ -97,7 +97,6 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
           avgRating = ratedCount > 0 ? (ratingSum / ratedCount) : 0;
         });
       } else {
-        // تصفير البيانات إذا لم يوجد مناديب مرتبطين
         setState(() {
           totalOrders = 0;
           totalSales = 0;
@@ -219,7 +218,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       child: ListTile(
         leading: Icon(icon, color: kPrimaryColor, size: 22.sp),
         title: Text(title, style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
-        trailing: Icon(Icons.arrow_forward_ios, size: 14.sp),
+        trailing: const Icon(Icons.arrow_forward_ios, size: 14.sp),
         onTap: onTap,
       ),
     );
@@ -238,13 +237,22 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               child: ListView(
                 children: [
                   _drawerItem(Icons.dashboard, "الرئيسية", true, onTap: () => Navigator.pop(context)),
-                  _drawerItem(Icons.receipt_long, "تقارير الطلبات", false),
+                  
+                  // تفعيل زر تقارير الطلبات 🛑
+                  _drawerItem(Icons.receipt_long, "تقارير الطلبات", false, onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const SalesOrdersReportScreen()),
+                    );
+                  }),
+
                   _drawerItem(Icons.people, "العملاء", false),
                   _drawerItem(Icons.manage_accounts, staffTitle, false, onTap: () {
                     Navigator.pop(context);
                     Navigator.pushNamed(context, '/manage_users');
                   }),
-                  _drawerItem(Icons.pie_chart, "التقارير الشاملة", false),
+                  _drawerItem(Icons.pie_chart, "الالتقارير الشاملة", false),
                   _drawerItem(Icons.percent, "عروض الشهر", false),
                   _drawerItem(Icons.location_on, "تقارير الزيارات", false),
                   _drawerItem(Icons.sensors, "لايف - المتابعة اللحظية", false, onTap: () {
