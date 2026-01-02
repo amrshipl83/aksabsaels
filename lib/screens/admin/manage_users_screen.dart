@@ -57,16 +57,16 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
             labelColor: kPrimaryColor,
             unselectedLabelColor: Colors.grey,
             indicatorColor: kPrimaryColor,
-            tabs: isManager 
-              ? [const Tab(text: "المشرفين"), const Tab(text: "جميع المندوبين")]
-              : [const Tab(text: "مندوبي المبيعات")],
+            tabs: isManager
+                ? [const Tab(text: "المشرفين"), const Tab(text: "جميع المندوبين")]
+                : [const Tab(text: "مندوبي المبيعات")],
           ),
         ),
         body: TabBarView(
           controller: _tabController,
-          children: isManager 
-            ? [_buildUserList('managers', 'managerId'), _buildUserList('salesRep', 'managerId')]
-            : [_buildUserList('salesRep', 'supervisorId')],
+          children: isManager
+              ? [_buildUserList('managers', 'managerId'), _buildUserList('salesRep', 'managerId')]
+              : [_buildUserList('salesRep', 'supervisorId')],
         ),
       ),
     );
@@ -74,13 +74,12 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
 
   Widget _buildUserList(String collectionName, String filterField) {
     return StreamBuilder<QuerySnapshot>(
-      // البحث المباشر عن المعرف (ManagerId أو SupervisorId) بدلاً من المصفوفة
       stream: FirebaseFirestore.instance
           .collection(collectionName)
           .where(filterField, isEqualTo: _userData?['uid'])
           .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return Center(child: Text("حدث خطأ ما"));
+        if (snapshot.hasError) return const Center(child: Text("حدث خطأ ما"));
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
         var docs = snapshot.data!.docs;
@@ -114,8 +113,8 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(data['fullname'] ?? 'بدون اسم', 
-                  style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
+                Text(data['fullname'] ?? 'بدون اسم',
+                    style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
                 Icon(Icons.person_pin, color: kPrimaryColor),
               ],
             ),
@@ -127,9 +126,10 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(hasTarget ? "🎯 تم تعيين الهدف" : "⚠️ لم يتم تعيين هدف",
-                  style: TextStyle(fontSize: 12.sp, color: hasTarget ? Colors.green : Colors.orange)),
+                    style: TextStyle(fontSize: 12.sp, color: hasTarget ? Colors.green : Colors.orange)),
                 ElevatedButton(
-                  style: ElevatedButton.fromStyleFrom(backgroundColor: kPrimaryColor),
+                  // 🛑 التصحيح هنا: استخدام styleFrom بدلاً من fromStyleFrom
+                  style: ElevatedButton.styleFrom(backgroundColor: kPrimaryColor),
                   onPressed: () => _showTargetModal(docId, data['fullname'], collection),
                   child: Text("تعيين هدف", style: TextStyle(color: Colors.white, fontSize: 11.sp)),
                 ),
