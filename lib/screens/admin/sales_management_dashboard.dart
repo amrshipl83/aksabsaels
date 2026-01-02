@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
-// استيراد الصفحة الجديدة 🛑
+// استيراد الصفحة الجديدة
 import 'sales_orders_report_screen.dart';
 
 class SalesManagementDashboard extends StatefulWidget {
@@ -53,14 +53,12 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Future<void> _loadStats() async {
     String role = _userData?['role'] ?? '';
-    // القراءة من docId المضمون بدلاً من uid
     String managerDocId = _userData?['docId'] ?? '';
     if (managerDocId.isEmpty) return;
 
     try {
       Query agentsQuery = FirebaseFirestore.instance.collection('salesRep');
-      
-      // تحديد البحث بناءً على الرتبة باستخدام المعرف الصحيح
+
       if (role == 'sales_supervisor') {
         agentsQuery = agentsQuery.where('supervisorId', isEqualTo: managerDocId);
       } else if (role == 'sales_manager') {
@@ -73,10 +71,9 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       if (agentsSnap.docs.isNotEmpty) {
         List<String> repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
 
-        // جلب الطلبات بناءً على أكواد المناديب التابعين
         Query ordersQuery = FirebaseFirestore.instance.collection('orders')
             .where('buyer.repCode', whereIn: repCodes);
-            
+
         final ordersSnap = await ordersQuery.get();
         double salesSum = 0;
         double ratingSum = 0;
@@ -110,9 +107,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
+    if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     if (_errorMsg != null) {
       return Scaffold(body: Center(child: Text("خطأ: $_errorMsg", style: const TextStyle(color: Colors.red))));
@@ -121,52 +116,49 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     String role = _userData?['role'] ?? '';
     String staffManagementTitle = (role == 'sales_manager') ? "المندوبين والمشرفين" : "المندوبين";
 
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: Scaffold(
-        backgroundColor: kBgColor,
-        appBar: AppBar(
-          title: Text("لوحة التحكم", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.white,
-          foregroundColor: kSidebarColor,
-          elevation: 0.5,
-          leading: Builder(builder: (context) {
-            return IconButton(
-              icon: Icon(Icons.menu, size: 25.sp),
-              onPressed: () => Scaffold.of(context).openDrawer(),
-            );
-          }),
-        ),
-        drawer: _buildDrawer(staffManagementTitle),
-        body: SingleChildScrollView(
-          padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 2.h),
-          child: Column(
-            children: [
-              _buildWelcomeSection(),
-              SizedBox(height: 3.h),
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                crossAxisSpacing: 3.w,
-                mainAxisSpacing: 3.w,
-                childAspectRatio: 1.1,
-                children: [
-                  _buildStatCard("إجمالي الطلبات", "$totalOrders", Icons.shopping_basket, Colors.blue),
-                  _buildStatCard("إجمالي المبيعات", "${totalSales.toInt()}", Icons.monetization_on, Colors.green),
-                  _buildStatCard("عدد المندوبين", "$totalAgents", Icons.people, Colors.orange),
-                  _buildStatCard("متوسط التقييم", avgRating.toStringAsFixed(1), Icons.star, Colors.amber),
-                ],
-              ),
-              SizedBox(height: 4.h),
-              _buildQuickAction(Icons.sensors, "تتبع المندوبين لايف", () {
-                Navigator.pushNamed(context, '/live_monitoring');
-              }),
-              _buildQuickAction(Icons.manage_accounts, staffManagementTitle, () {
-                Navigator.pushNamed(context, '/manage_users');
-              }),
-            ],
-          ),
+    return Scaffold(
+      backgroundColor: kBgColor,
+      appBar: AppBar(
+        title: Text("لوحة التحكم", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        foregroundColor: kSidebarColor,
+        elevation: 0.5,
+        leading: Builder(builder: (context) {
+          return IconButton(
+            icon: Icon(Icons.menu, size: 25.sp),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          );
+        }),
+      ),
+      drawer: _buildDrawer(staffManagementTitle),
+      body: SingleChildScrollView(
+        padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 2.h),
+        child: Column(
+          children: [
+            _buildWelcomeSection(),
+            SizedBox(height: 3.h),
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 2,
+              crossAxisSpacing: 3.w,
+              mainAxisSpacing: 3.w,
+              childAspectRatio: 1.1,
+              children: [
+                _buildStatCard("إجمالي الطلبات", "$totalOrders", Icons.shopping_basket, Colors.blue),
+                _buildStatCard("إجمالي المبيعات", "${totalSales.toInt()}", Icons.monetization_on, Colors.green),
+                _buildStatCard("عدد المندوبين", "$totalAgents", Icons.people, Colors.orange),
+                _buildStatCard("متوسط التقييم", avgRating.toStringAsFixed(1), Icons.star, Colors.amber),
+              ],
+            ),
+            SizedBox(height: 4.h),
+            _buildQuickAction(Icons.sensors, "تتبع المندوبين لايف", () {
+              Navigator.pushNamed(context, '/live_monitoring');
+            }),
+            _buildQuickAction(Icons.manage_accounts, staffManagementTitle, () {
+              Navigator.pushNamed(context, '/manage_users');
+            }),
+          ],
         ),
       ),
     );
@@ -218,7 +210,8 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       child: ListTile(
         leading: Icon(icon, color: kPrimaryColor, size: 22.sp),
         title: Text(title, style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
-        trailing: const Icon(Icons.arrow_forward_ios, size: 14.sp),
+        // تم حذف const هنا لحل مشكلة البناء 🛑
+        trailing: Icon(Icons.arrow_forward_ios, size: 14.sp),
         onTap: onTap,
       ),
     );
@@ -237,8 +230,6 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               child: ListView(
                 children: [
                   _drawerItem(Icons.dashboard, "الرئيسية", true, onTap: () => Navigator.pop(context)),
-                  
-                  // تفعيل زر تقارير الطلبات 🛑
                   _drawerItem(Icons.receipt_long, "تقارير الطلبات", false, onTap: () {
                     Navigator.pop(context);
                     Navigator.push(
@@ -246,13 +237,12 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
                       MaterialPageRoute(builder: (context) => const SalesOrdersReportScreen()),
                     );
                   }),
-
                   _drawerItem(Icons.people, "العملاء", false),
                   _drawerItem(Icons.manage_accounts, staffTitle, false, onTap: () {
                     Navigator.pop(context);
                     Navigator.pushNamed(context, '/manage_users');
                   }),
-                  _drawerItem(Icons.pie_chart, "الالتقارير الشاملة", false),
+                  _drawerItem(Icons.pie_chart, "التقارير الشاملة", false),
                   _drawerItem(Icons.percent, "عروض الشهر", false),
                   _drawerItem(Icons.location_on, "تقارير الزيارات", false),
                   _drawerItem(Icons.sensors, "لايف - المتابعة اللحظية", false, onTap: () {
