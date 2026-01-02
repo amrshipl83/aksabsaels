@@ -15,13 +15,11 @@ class SalesManagementDashboard extends StatefulWidget {
 class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
-  
-  // الألوان الأساسية المأخوذة من الـ HTML الخاص بك
+
   final Color kPrimaryColor = const Color(0xFF1ABC9C);
   final Color kSidebarColor = const Color(0xFF2F3542);
   final Color kBgColor = const Color(0xFFF5F6FA);
 
-  // متغيرات البيانات
   int totalOrders = 0;
   double totalSales = 0;
   int totalAgents = 0;
@@ -45,21 +43,21 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Future<void> _loadStats() async {
     String role = _userData?['role'] ?? '';
-    String managerDocId = _userData!['uid']; // Document ID للمدير/المشرف
+    String managerDocId = _userData!['uid'];
 
     try {
-      // 1. حساب عدد المندوبين
       Query agentsQuery = FirebaseFirestore.instance.collection('salesRep');
       if (role == 'sales_supervisor') {
-        agentsQuery = agentsQuery.where('supervisorId', 'isEqualTo', managerDocId);
+        // تصحيح: استخدام isEqualTo كـ Named Argument
+        agentsQuery = agentsQuery.where('supervisorId', isEqualTo: managerDocId);
       }
       final agentsSnap = await agentsQuery.get();
       totalAgents = agentsSnap.size;
 
-      // 2. جلب الطلبات وحساب الإجماليات
       Query ordersQuery = FirebaseFirestore.instance.collection('orders');
       if (role == 'sales_supervisor' && agentsSnap.docs.isNotEmpty) {
         List<String> repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
+        // تصحيح: استخدام whereIn كـ Named Argument
         ordersQuery = ordersQuery.where('buyer.repCode', whereIn: repCodes);
       }
 
@@ -98,10 +96,14 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       child: Scaffold(
         backgroundColor: kBgColor,
         appBar: AppBar(
-          title: Text(_userData?['role'] == 'sales_manager' ? 'لوحة المبيعات' : 'إدارة المشرف'),
+          title: Text(
+            _userData?['role'] == 'sales_manager' ? 'لوحة المبيعات' : 'إدارة المشرف',
+            style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold),
+          ),
           backgroundColor: Colors.white,
           foregroundColor: kSidebarColor,
           elevation: 0.5,
+          centerTitle: true,
         ),
         drawer: _buildDrawer(),
         body: SingleChildScrollView(
@@ -110,29 +112,24 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildWelcomeSection(),
-              SizedBox(height: 20.dp),
-              
-              // شبكة الإحصائيات (2 في كل صف - مثالية للموبايل)
+              SizedBox(height: 25.dp),
               GridView.count(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 crossAxisCount: 2,
                 crossAxisSpacing: 12.dp,
                 mainAxisSpacing: 12.dp,
-                childAspectRatio: 1.2,
+                childAspectRatio: 1.1,
                 children: [
                   _buildStatCard("إجمالي الطلبات", "$totalOrders", Icons.shopping_basket, Colors.blue),
-                  _buildStatCard("إجمالي المبيعات", "${totalSales.toInt()} ج.م", Icons.monetization_on, Colors.green),
+                  _buildStatCard("إجمالي المبيعات", "${totalSales.toInt()}", Icons.monetization_on, Colors.green),
                   _buildStatCard("عدد المندوبين", "$totalAgents", Icons.people, Colors.orange),
                   _buildStatCard("متوسط التقييم", avgRating.toStringAsFixed(1), Icons.star, Colors.amber),
                 ],
               ),
-              
-              SizedBox(height: 25.dp),
-              Text("الإجراءات السريعة", style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold)),
-              SizedBox(height: 10.dp),
-              
-              // أزرار وصول سريع للتقارير
+              SizedBox(height: 30.dp),
+              Text("الإجراءات السريعة", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
+              SizedBox(height: 15.dp),
               _buildQuickAction(Icons.file_copy, "عرض تقارير اليوم", () {}),
               _buildQuickAction(Icons.map, "تتبع المندوبين لايف", () {}),
             ],
@@ -144,21 +141,28 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Widget _buildWelcomeSection() {
     return Container(
-      padding: EdgeInsets.all(15.dp),
+      padding: EdgeInsets.all(18.dp),
       decoration: BoxDecoration(
         color: kSidebarColor,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(15),
       ),
       child: Row(
         children: [
-          CircleAvatar(backgroundColor: kPrimaryColor, child: const Icon(Icons.admin_panel_settings, color: Colors.white)),
-          SizedBox(width: 12.dp),
+          CircleAvatar(
+            radius: 25.dp,
+            backgroundColor: kPrimaryColor,
+            child: Icon(Icons.admin_panel_settings, color: Colors.white, size: 28.dp),
+          ),
+          SizedBox(width: 15.dp),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("مرحباً بك،", style: TextStyle(color: Colors.white70, fontSize: 10.sp)),
-                Text("${_userData?['fullname']}", style: TextStyle(color: Colors.white, fontSize: 13.sp, fontWeight: FontWeight.bold)),
+                Text("مرحباً بك،", style: TextStyle(color: Colors.white70, fontSize: 14.sp)),
+                Text(
+                  "${_userData?['fullname']}",
+                  style: TextStyle(color: Colors.white, fontSize: 18.sp, fontWeight: FontWeight.bold),
+                ),
               ],
             ),
           ),
@@ -169,7 +173,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Widget _buildStatCard(String title, String value, IconData icon, Color color) {
     return Container(
-      padding: EdgeInsets.all(12.dp),
+      padding: EdgeInsets.all(10.dp),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
@@ -178,10 +182,15 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 24.sp),
-          SizedBox(height: 8.dp),
-          Text(title, style: TextStyle(color: Colors.grey, fontSize: 9.sp), textAlign: TextAlign.center),
-          Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.sp, color: kSidebarColor)),
+          Icon(icon, color: color, size: 30.sp),
+          SizedBox(height: 10.dp),
+          Text(title, style: TextStyle(color: Colors.grey[700], fontSize: 13.sp), textAlign: TextAlign.center),
+          FittedBox(
+            child: Text(
+              value,
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18.sp, color: kSidebarColor),
+            ),
+          ),
         ],
       ),
     );
@@ -189,12 +198,14 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Widget _buildQuickAction(IconData icon, String title, VoidCallback onTap) {
     return Card(
-      margin: EdgeInsets.only(bottom: 10.dp),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      margin: EdgeInsets.only(bottom: 12.dp),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
-        leading: Icon(icon, color: kPrimaryColor),
-        title: Text(title, style: TextStyle(fontSize: 11.sp)),
-        trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+        contentPadding: EdgeInsets.symmetric(horizontal: 20.dp, vertical: 8.dp),
+        leading: Icon(icon, color: kPrimaryColor, size: 28.sp),
+        title: Text(title, style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w500)),
+        trailing: Icon(Icons.arrow_forward_ios, size: 18.sp, color: Colors.grey),
         onTap: onTap,
       ),
     );
@@ -204,13 +215,13 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     return Drawer(
       child: Container(
         color: kSidebarColor,
-        child: SafeArea( // لضمان عدم نزول زر الخروج تحت أزرار الهاتف
+        child: SafeArea(
           child: Column(
             children: [
-              const SizedBox(height: 20),
-              Text("أكسب - إدارة المبيعات", style: TextStyle(color: kPrimaryColor, fontSize: 15.sp, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 20),
-              const Divider(color: Colors.white24),
+              SizedBox(height: 30.dp),
+              Text("أكسب - إدارة المبيعات", style: TextStyle(color: kPrimaryColor, fontSize: 20.sp, fontWeight: FontWeight.bold)),
+              SizedBox(height: 20.dp),
+              const Divider(color: Colors.white24, thickness: 1),
               Expanded(
                 child: ListView(
                   children: [
@@ -225,12 +236,13 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
                   ],
                 ),
               ),
+              const Divider(color: Colors.white24),
               _drawerItem(Icons.logout, "تسجيل الخروج", false, color: Colors.redAccent, onTap: () async {
                 await FirebaseAuth.instance.signOut();
                 (await SharedPreferences.getInstance()).clear();
                 if (mounted) Navigator.of(context).pushReplacementNamed('/');
               }),
-              const SizedBox(height: 10),
+              SizedBox(height: 15.dp),
             ],
           ),
         ),
@@ -241,13 +253,13 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   Widget _drawerItem(IconData icon, String title, bool isSelected, {Color? color, bool isLive = false, VoidCallback? onTap}) {
     return ListTile(
       onTap: onTap ?? () => Navigator.pop(context),
-      leading: Icon(icon, color: color ?? (isSelected ? kPrimaryColor : Colors.white70)),
+      leading: Icon(icon, color: color ?? (isSelected ? kPrimaryColor : Colors.white70), size: 22.sp),
       title: Row(
         children: [
-          Text(title, style: TextStyle(color: color ?? Colors.white, fontSize: 11.sp)),
+          Text(title, style: TextStyle(color: color ?? Colors.white, fontSize: 15.sp)),
           if (isLive) ...[
-            const SizedBox(width: 8),
-            Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle)),
+            SizedBox(width: 10.dp),
+            Container(width: 10.dp, height: 10.dp, decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle)),
           ]
         ],
       ),
