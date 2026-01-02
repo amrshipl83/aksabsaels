@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
-import 'package:sizer/sizer.dart';
 
 class SalesOrdersReportScreen extends StatefulWidget {
   const SalesOrdersReportScreen({super.key});
@@ -24,13 +23,18 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   }
 
   Future<void> _initializeData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString('userData');
-    if (data != null) {
-      _userData = jsonDecode(data);
-      await _fetchHierarchy();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final data = prefs.getString('userData');
+      if (data != null) {
+        _userData = jsonDecode(data);
+        await _fetchHierarchy();
+      }
+    } catch (e) {
+      debugPrint("Init Data Error: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-    if (mounted) setState(() => _isLoading = false);
   }
 
   Future<void> _fetchHierarchy() async {
@@ -62,7 +66,11 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
         codes = reps.docs.map((d) => d['repCode'] as String).toList();
       }
 
-      if (mounted) setState(() => _targetRepCodes = codes);
+      if (mounted) {
+        setState(() {
+          _targetRepCodes = codes;
+        });
+      }
     } catch (e) {
       debugPrint("Error Building Sales Hierarchy: $e");
     }
@@ -72,12 +80,11 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   Widget build(BuildContext context) {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
-    // تم حذف Directionality لضمان نجاح الـ Build واعتماداً على main.dart
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
-        title: Text("تقرير الطلبات", 
-          style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
+        title: const Text("تقرير الطلبات", 
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), // استخدمنا 18 ثابتة
         backgroundColor: Colors.white,
         foregroundColor: const Color(0xFF2F3542),
         elevation: 0.5,
@@ -93,17 +100,20 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.inventory_2_outlined, size: 50.sp, color: Colors.grey),
-          SizedBox(height: 10.sp),
+        children: const [
+          Icon(Icons.inventory_2_outlined, size: 60, color: Colors.grey),
+          SizedBox(height: 16),
           Text("لا توجد طلبات لعرضها حالياً", 
-            style: TextStyle(fontSize: 14.sp, color: Colors.grey)),
+            style: TextStyle(fontSize: 16, color: Colors.grey)),
         ],
       ),
     );
   }
 
   Widget _buildOrdersStream() {
+    // حل مشكلة whereIn لا تقبل قائمة فارغة
+    if (_targetRepCodes.isEmpty) return _emptyState();
+
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('orders')
@@ -111,14 +121,14 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
           .orderBy('orderDate', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return const Center(child: Text("حدث خطأ في جلب الطلبات"));
+        if (snapshot.hasError) return Center(child: Text("خطأ: ${snapshot.error}"));
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
         var orders = snapshot.data!.docs;
         if (orders.isEmpty) return _emptyState();
 
         return ListView.builder(
-          padding: EdgeInsets.all(10.sp),
+          padding: const EdgeInsets.all(12),
           itemCount: orders.length,
           itemBuilder: (context, index) {
             var data = orders[index].data() as Map<String, dynamic>;
@@ -132,20 +142,20 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   Widget _orderCard(Map<String, dynamic> order, String id) {
     var buyer = order['buyer'] as Map<String, dynamic>?;
     return Card(
-      margin: EdgeInsets.only(bottom: 12.sp),
+      margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ExpansionTile(
         leading: CircleAvatar(
           backgroundColor: const Color(0xFF1ABC9C).withOpacity(0.1),
-          child: Icon(Icons.shopping_cart, color: const Color(0xFF1ABC9C), size: 18.sp),
+          child: const Icon(Icons.shopping_cart, color: Color(0xFF1ABC9C), size: 20),
         ),
         title: Text(buyer?['name'] ?? 'بدون اسم', 
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp)),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
         subtitle: Text("القيمة: ${order['total']} ج.م", 
-          style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
+          style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
         children: [
           Padding(
-            padding: EdgeInsets.all(12.sp),
+            padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -154,8 +164,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
                 _infoRow(Icons.location_on, "العنوان", buyer?['address'] ?? '-'),
                 _infoRow(Icons.person_outline, "المندوب", buyer?['repName'] ?? '-'),
                 const Divider(),
-                Text("الأصناف:", 
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.sp)),
+                const Text("الأصناف:", 
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                 ...((order['items'] as List? ?? []).map((item) => ListTile(
                   dense: true,
                   title: Text(item['productName'] ?? ''),
@@ -171,14 +181,14 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
 
   Widget _infoRow(IconData icon, String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Icon(icon, size: 12.sp, color: Colors.grey),
-          SizedBox(width: 5.sp),
-          Text("$label: ", style: TextStyle(color: Colors.grey[600], fontSize: 11.sp)),
+          Icon(icon, size: 14, color: Colors.grey),
+          const SizedBox(width: 8),
+          Text("$label: ", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
           Expanded(child: Text(value, 
-            style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.w500))),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
         ],
       ),
     );
@@ -186,8 +196,12 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
 
   String _formatDate(dynamic ts) {
     if (ts == null) return "-";
-    DateTime dt = (ts as Timestamp).toDate();
-    return DateFormat('yyyy-MM-dd').format(dt);
+    try {
+      DateTime dt = (ts as Timestamp).toDate();
+      return DateFormat('yyyy-MM-dd').format(dt);
+    } catch (e) {
+      return ts.toString();
+    }
   }
 }
 
