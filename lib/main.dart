@@ -73,8 +73,13 @@ class AksabSalesApp extends StatelessWidget {
             // ✅ تسجيل مسار شاشة العروض الجديدة
             '/offers': (context) => const OffersScreen(),
 
-            // صفحة الأداء
-            '/performance_dashboard': (context) => const PerformanceDashboardScreen(),
+            // ✅ إصلاح صفحة الأداء لاستقبال المعرف الممرر
+            '/performance_dashboard': (context) {
+              final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+              return PerformanceDashboardScreen(
+                targetDocId: args?['targetDocId'] ?? '',
+              );
+            },
           },
         );
       },
