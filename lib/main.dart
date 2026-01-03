@@ -16,8 +16,10 @@ import 'screens/admin/live_monitoring_screen.dart';
 import 'screens/admin/manage_users_screen.dart';
 import 'screens/admin/sales_orders_report_screen.dart';
 import 'screens/admin/performance_dashboard_screen.dart';
-// ✅ إضافة استيراد شاشة العملاء الجديدة
 import 'screens/admin/customers_report_screen.dart';
+
+// ✅ إضافة استيراد شاشة العروض والجوائز الجديدة
+import 'screens/admin/offers_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,7 +39,7 @@ class AksabSalesApp extends StatelessWidget {
         return MaterialApp(
           title: 'Aksab Sales App',
           debugShowCheckedModeBanner: false,
-          // ✅ الحفاظ على اتجاه النص العام للتطبيق (RTL) هنا فقط
+          // ✅ الحفاظ على اتجاه النص العام للتطبيق (RTL)
           builder: (context, child) {
             return Directionality(
               textDirection: TextDirection.rtl,
@@ -66,10 +68,11 @@ class AksabSalesApp extends StatelessWidget {
             '/live_monitoring': (context) => const LiveMonitoringScreen(),
             '/manage_users': (context) => const ManageUsersScreen(),
             '/sales_report': (context) => const SalesOrdersReportScreen(),
-            
-            // ✅ تسجيل مسار شاشة العملاء الجديدة لسهولة الاستدعاء
             '/customers_report': (context) => const CustomersReportScreen(),
             
+            // ✅ تسجيل مسار شاشة العروض الجديدة
+            '/offers': (context) => const OffersScreen(),
+
             // صفحة الأداء
             '/performance_dashboard': (context) => const PerformanceDashboardScreen(),
           },

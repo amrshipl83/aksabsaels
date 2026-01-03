@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'sales_rep_dashboard.dart';
 import 'visit_screen.dart';
 import 'goals_screen.dart'; // استيراد شاشة الأهداف
+import '../admin/offers_screen.dart'; // ✅ استيراد شاشة العروض المدمجة
 
 // --- الثوابت اللونية ---
 const Color kPrimaryColor = Color(0xFF3498db);
@@ -160,7 +161,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     return Drawer(
       child: Container(
         color: kSecondaryColor,
-        child: SafeArea( // تأمين المساحة لزر الخروج والأيقونات السفلى
+        child: SafeArea(
           child: Column(
             children: [
               UserAccountsDrawerHeader(
@@ -179,38 +180,43 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                   children: [
                     _drawerItem(Icons.dashboard_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
                     _drawerItem(Icons.storefront_outlined, "المتجر", false),
-                    
-                    // --- ربط أيقونة الأهداف ---
                     _drawerItem(
-                      Icons.track_changes_outlined, 
-                      "الأهداف", 
-                      false,
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
-                      }
-                    ),
-                    
-                    _drawerItem(Icons.people_outline, "عملائي", false),
-                    _drawerItem(Icons.receipt_outlined, "طلباتي", false), // أيقونة إضافية من الـ HTML
-                    
-                    _drawerItem(
-                      Icons.location_on_outlined,
-                      "الزيارات",
-                      false,
-                      onTap: () {
-                        Navigator.pop(context);
-                        if (_isDayOpen) {
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => const VisitScreen()));
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("❌ يجب بدء يوم العمل أولاً لتسجيل الزيارات")),
-                          );
+                        Icons.track_changes_outlined,
+                        "الأهداف",
+                        false,
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
                         }
-                      }
                     ),
-                    _drawerItem(Icons.local_offer_outlined, "عروض", false), // أيقونة إضافية من الـ HTML
-                    _drawerItem(Icons.bar_chart_outlined, "التقارير", false), // أيقونة إضافية من الـ HTML
+                    _drawerItem(Icons.people_outline, "عملائي", false),
+                    _drawerItem(Icons.receipt_outlined, "طلباتي", false),
+                    _drawerItem(
+                        Icons.location_on_outlined,
+                        "الزيارات",
+                        false,
+                        onTap: () {
+                          Navigator.pop(context);
+                          if (_isDayOpen) {
+                            Navigator.push(context, MaterialPageRoute(builder: (context) => const VisitScreen()));
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("❌ يجب بدء يوم العمل أولاً لتسجيل الزيارات")),
+                            );
+                          }
+                        }
+                    ),
+                    // ✅ تم استبدال خيار "عروض" القديم بمركز العروض والجوائز المدمج
+                    _drawerItem(
+                        Icons.local_offer_outlined,
+                        "مركز العروض والجوائز",
+                        false,
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
+                        }
+                    ),
+                    _drawerItem(Icons.bar_chart_outlined, "التقارير", false),
                   ],
                 ),
               ),
@@ -221,7 +227,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                 await prefs.clear();
                 if (mounted) Navigator.of(context).pushReplacementNamed('/');
               }),
-              const SizedBox(height: 10), // مسافة بسيطة لزر الخروج
+              const SizedBox(height: 10),
             ],
           ),
         ),

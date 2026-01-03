@@ -8,6 +8,7 @@ import 'package:sizer/sizer.dart';
 // استيراد الصفحات التابعة
 import 'sales_orders_report_screen.dart';
 import 'customers_report_screen.dart';
+import 'offers_screen.dart'; // إضافة الاستيراد
 
 class SalesManagementDashboard extends StatefulWidget {
   const SalesManagementDashboard({super.key});
@@ -20,11 +21,9 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
   String? _errorMsg;
-
   final Color kPrimaryColor = const Color(0xFF1ABC9C);
   final Color kSidebarColor = const Color(0xFF2F3542);
   final Color kBgColor = const Color(0xFFF5F6FA);
-
   int totalOrders = 0;
   double totalSales = 0;
   int totalAgents = 0;
@@ -53,55 +52,42 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     }
   }
 
-  // ✅ الدالة المصححة منطقياً لجلب الإحصائيات
   Future<void> _loadStats() async {
     String role = _userData?['role'] ?? '';
     String myDocId = _userData?['docId'] ?? '';
     if (myDocId.isEmpty) return;
-
     try {
       List<String> repCodes = [];
-
       if (role == 'sales_supervisor') {
-        // المشرف: جلب مناديبه مباشرة
         final agentsSnap = await FirebaseFirestore.instance
             .collection('salesRep')
             .where('supervisorId', isEqualTo: myDocId)
             .get();
         repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
         totalAgents = agentsSnap.size;
-      } 
-      else if (role == 'sales_manager') {
-        // المدير: جلب المشرفين أولاً ثم مناديبهم
+      } else if (role == 'sales_manager') {
         final supervisorsSnap = await FirebaseFirestore.instance
             .collection('managers')
             .where('managerId', isEqualTo: myDocId)
             .get();
-        
         List<String> supervisorIds = supervisorsSnap.docs.map((d) => d.id).toList();
-
         if (supervisorIds.isNotEmpty) {
           final agentsSnap = await FirebaseFirestore.instance
               .collection('salesRep')
               .where('supervisorId', whereIn: supervisorIds)
               .get();
-          
           repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
           totalAgents = agentsSnap.size;
         }
       }
-
-      // حساب إحصائيات الطلبات بناءً على الأكواد المجمعة
       if (repCodes.isNotEmpty) {
         final ordersSnap = await FirebaseFirestore.instance
             .collection('orders')
             .where('buyer.repCode', whereIn: repCodes)
             .get();
-
         double salesSum = 0;
         double ratingSum = 0;
         int ratedCount = 0;
-
         for (var doc in ordersSnap.docs) {
           var d = doc.data();
           salesSum += (d['total'] ?? 0).toDouble();
@@ -110,7 +96,6 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             ratedCount++;
           }
         }
-
         setState(() {
           totalOrders = ordersSnap.size;
           totalSales = salesSum;
@@ -132,14 +117,11 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-
     if (_errorMsg != null) {
       return Scaffold(body: Center(child: Text("خطأ: $_errorMsg", style: const TextStyle(color: Colors.red))));
     }
-
     String role = _userData?['role'] ?? '';
     String staffTitle = (role == 'sales_manager') ? "المشرفين والمناديب" : "المناديب";
-
     return Scaffold(
       backgroundColor: kBgColor,
       appBar: AppBar(
@@ -176,6 +158,11 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               ],
             ),
             SizedBox(height: 4.h),
+            // ✅ إضافة زر العروض الجديد
+            _buildQuickAction(Icons.card_giftcard, "مركز العروض والجوائز", () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
+            }),
+            // ⬇️ الأيقونات الأصلية كما هي تماماً ⬇️
             _buildQuickAction(Icons.sensors, "تتبع المندوبين لايف", () {
               Navigator.pushNamed(context, '/live_monitoring');
             }),
@@ -257,6 +244,11 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               child: ListView(
                 children: [
                   _drawerItem(Icons.dashboard, "الرئيسية", true, onTap: () => Navigator.pop(context)),
+                  // ✅ إضافة خيار العروض في القائمة الجانبية
+                  _drawerItem(Icons.card_giftcard, "مركز العروض", false, onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
+                  }),
                   _drawerItem(Icons.receipt_long, "تقارير الطلبات", false, onTap: () {
                     Navigator.pop(context);
                     Navigator.push(context, MaterialPageRoute(builder: (context) => const SalesOrdersReportScreen()));
