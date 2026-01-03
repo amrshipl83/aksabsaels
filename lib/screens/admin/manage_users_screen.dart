@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
+// استيراد الصفحة الجديدة
+import 'performance_dashboard_screen.dart'; 
 
 class ManageUsersScreen extends StatefulWidget {
   const ManageUsersScreen({super.key});
@@ -27,12 +29,13 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
     final prefs = await SharedPreferences.getInstance();
     final data = prefs.getString('userData');
     if (data != null) {
-      setState(() {
-        _userData = jsonDecode(data);
-        // تحديد عدد التبويبات بناءً على الدور
-        int tabCount = (_userData?['role'] == 'sales_manager') ? 2 : 1;
-        _tabController = TabController(length: tabCount, vsync: this);
-      });
+      if (mounted) {
+        setState(() {
+          _userData = jsonDecode(data);
+          int tabCount = (_userData?['role'] == 'sales_manager') ? 2 : 1;
+          _tabController = TabController(length: tabCount, vsync: this);
+        });
+      }
     }
   }
 
@@ -55,9 +58,10 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F6FA),
         appBar: AppBar(
-          title: Text("إدارة الموظفين", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold)),
+          title: Text("إدارة الموظفين والأداء", style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
           backgroundColor: Colors.white,
           foregroundColor: kSidebarColor,
+          elevation: 0.5,
           bottom: TabBar(
             controller: _tabController,
             labelColor: kPrimaryColor,
@@ -72,11 +76,11 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
           controller: _tabController,
           children: isManager
               ? [
-                  _buildUserList('managers', 'managerId'), // البحث عن مشرفين تابعين للمدير
-                  _buildUserList('salesRep', 'managerId')  // البحث عن مناديب تابعين للمدير
+                  _buildUserList('managers', 'managerId'), 
+                  _buildUserList('salesRep', 'managerId')  
                 ]
               : [
-                  _buildUserList('salesRep', 'supervisorId') // البحث عن مناديب تابعين للمشرف
+                  _buildUserList('salesRep', 'supervisorId') 
                 ],
         ),
       ),
@@ -84,22 +88,21 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
   }
 
   Widget _buildUserList(String collectionName, String filterField) {
-    // 🛑 التعديل هنا: استخدام docId لضمان الربط الصحيح بالوثائق المربوطة
     String myDocId = _userData?['docId'] ?? '';
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection(collectionName)
-          .where(filterField, isEqualTo: myDocId) // تم التغيير من uid إلى docId
+          .where(filterField, isEqualTo: myDocId)
           .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return const Center(child: Text("حدث خطأ ما"));
+        if (snapshot.hasError) return const Center(child: Text("حدث خطأ في جلب البيانات"));
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
         var docs = snapshot.data?.docs ?? [];
-        if (docs.isEmpty) return const Center(child: Text("لا توجد بيانات للعرض"));
+        if (docs.isEmpty) return const Center(child: Text("لا توجد سجلات حالياً"));
 
         return ListView.builder(
           padding: EdgeInsets.all(10.sp),
@@ -114,43 +117,88 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
   }
 
   Widget _buildUserCard(Map<String, dynamic> data, String docId, String collection) {
-    String currentMonth = DateTime.now().toString().substring(0, 7); // 2026-01
+    String currentMonth = DateTime.now().toString().substring(0, 7);
     bool hasTarget = data['targets']?[currentMonth] != null;
+    
+    // تحديد النوع لتوجيه صفحة الأداء بشكل سليم
+    String targetType = (collection == 'managers') ? 'sales_supervisor' : 'sales';
 
     return Card(
-      elevation: 3,
+      elevation: 2,
       margin: EdgeInsets.only(bottom: 12.sp),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: EdgeInsets.all(12.sp),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(data['fullname'] ?? 'بدون اسم',
-                    style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
-                Icon(Icons.person_pin, color: kPrimaryColor),
-              ],
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(15),
+        // 🛑 الانتقال لصفحة الأداء عند الضغط على الكرت
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PerformanceDashboardScreen(
+                targetDocId: docId,
+                targetType: targetType,
+                targetName: data['fullname'] ?? 'غير معروف',
+                repCode: data['repCode'], // سيكون null للمشرف وسيتم التعامل معه هناك
+              ),
             ),
-            const Divider(),
-            _infoRow(Icons.email, "البريد:", data['email'] ?? '-'),
-            _infoRow(Icons.badge, "الكود:", data['repCode'] ?? 'مشرف'),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(hasTarget ? "🎯 تم تعيين الهدف" : "⚠️ لم يتم تعيين هدف",
-                    style: TextStyle(fontSize: 12.sp, color: hasTarget ? Colors.green : Colors.orange)),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: kPrimaryColor),
-                  onPressed: () => _showTargetModal(docId, data['fullname'], collection),
-                  child: Text("تعيين هدف", style: TextStyle(color: Colors.white, fontSize: 11.sp)),
-                ),
-              ],
-            ),
-          ],
+          );
+        },
+        child: Padding(
+          padding: EdgeInsets.all(12.sp),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(data['fullname'] ?? 'بدون اسم',
+                          style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
+                      Text(targetType == 'sales_supervisor' ? "مشرف مبيعات" : "مندوب مبيعات",
+                          style: TextStyle(fontSize: 9.sp, color: kPrimaryColor)),
+                    ],
+                  ),
+                  Icon(Icons.analytics_outlined, color: kPrimaryColor, size: 22.sp),
+                ],
+              ),
+              const Divider(height: 20),
+              _infoRow(Icons.badge_outlined, "الكود:", data['repCode'] ?? 'إدارة'),
+              _infoRow(Icons.phone_android, "الهاتف:", data['phone'] ?? '-'),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        hasTarget ? Icons.check_circle : Icons.warning_amber_rounded,
+                        size: 14.sp,
+                        color: hasTarget ? Colors.green : Colors.orange,
+                      ),
+                      SizedBox(width: 4.sp),
+                      Text(hasTarget ? "هدف الشهر محدد" : "لم يحدد هدف",
+                          style: TextStyle(fontSize: 10.sp, color: hasTarget ? Colors.green : Colors.orange, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: kPrimaryColor,
+                      side: BorderSide(color: kPrimaryColor),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: EdgeInsets.symmetric(horizontal: 8.sp),
+                    ),
+                    onPressed: () => _showTargetModal(docId, data['fullname'], collection),
+                    icon: Icon(Icons.edit_calendar, size: 12.sp),
+                    label: Text("الأهداف", style: TextStyle(fontSize: 10.sp)),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -161,13 +209,13 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
       padding: EdgeInsets.symmetric(vertical: 2.sp),
       child: Row(
         children: [
-          Icon(icon, size: 14.sp, color: Colors.grey),
-          SizedBox(width: 5.sp),
-          Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 12.sp)),
-          SizedBox(width: 5.sp),
+          Icon(icon, size: 13.sp, color: Colors.grey[400]),
+          SizedBox(width: 6.sp),
+          Text(label, style: TextStyle(color: Colors.grey[500], fontSize: 11.sp)),
+          SizedBox(width: 4.sp),
           Expanded(
-            child: Text(value, 
-              style: TextStyle(color: kSidebarColor, fontWeight: FontWeight.w500, fontSize: 12.sp),
+            child: Text(value,
+              style: TextStyle(color: kSidebarColor, fontWeight: FontWeight.w500, fontSize: 11.sp),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -183,29 +231,40 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text("تحديد هدف $name"),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: Text("تحديد هدف: $name", style: TextStyle(fontSize: 14.sp)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: financialCtrl, decoration: const InputDecoration(labelText: "الهدف المالي (جنيه)"), keyboardType: TextInputType.number),
-            TextField(controller: visitsCtrl, decoration: const InputDecoration(labelText: "عدد الزيارات المستهدف"), keyboardType: TextInputType.number),
+            TextField(
+              controller: financialCtrl, 
+              decoration: const InputDecoration(labelText: "الهدف المالي المطلوب (جنيه)", prefixIcon: Icon(Icons.money)), 
+              keyboardType: TextInputType.number
+            ),
+            SizedBox(height: 10.sp),
+            TextField(
+              controller: visitsCtrl, 
+              decoration: const InputDecoration(labelText: "عدد الزيارات المستهدف", prefixIcon: Icon(Icons.location_on)), 
+              keyboardType: TextInputType.number
+            ),
           ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("إلغاء")),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: kPrimaryColor),
             onPressed: () async {
               String month = DateTime.now().toString().substring(0, 7);
               await FirebaseFirestore.instance.collection(collection).doc(docId).update({
                 'targets.$month': {
                   'financialTarget': double.tryParse(financialCtrl.text) ?? 0,
                   'visitsTarget': int.tryParse(visitsCtrl.text) ?? 0,
-                  'dateSet': DateTime.now().toIso8601String(),
+                  'dateSet': FieldValue.serverTimestamp(),
                 }
               });
               if (mounted) Navigator.pop(context);
             },
-            child: const Text("حفظ"),
+            child: const Text("حفظ الهدف", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
