@@ -12,8 +12,9 @@ import 'screens/rep/add_new_customer.dart';
 import 'screens/admin/sales_management_dashboard.dart';
 import 'screens/admin/live_monitoring_screen.dart';
 import 'screens/admin/manage_users_screen.dart';
-// 🛑 استيراد صفحة التقارير الجديدة
 import 'screens/admin/sales_orders_report_screen.dart';
+// 🛑 استيراد صفحة الأداء الجديدة لتجنب أخطاء التوجيه
+import 'screens/admin/performance_dashboard_screen.dart'; 
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,14 +42,13 @@ class AksabSalesApp extends StatelessWidget {
           },
           theme: ThemeData(
             primarySwatch: Colors.green,
-            fontFamily: 'Cairo',
+            fontFamily: 'Cairo', // تأكد من إضافة الخط في pubspec.yaml
             useMaterial3: true,
             colorScheme: ColorScheme.fromSeed(
               seedColor: const Color(0xFF43B97F),
               primary: const Color(0xFF43B97F),
             ),
           ),
-
           initialRoute: '/',
           routes: {
             '/': (context) => const LoginScreen(),
@@ -56,13 +56,15 @@ class AksabSalesApp extends StatelessWidget {
             '/rep_home': (context) => const SalesRepHomeScreen(),
             '/visits': (context) => const VisitScreen(),
             '/add_customer': (context) => const AddNewCustomerScreen(),
-
+            
             // --- مسارات الإدارة (Admin Routes) ---
             '/admin_dashboard': (context) => const SalesManagementDashboard(),
             '/live_monitoring': (context) => const LiveMonitoringScreen(),
             '/manage_users': (context) => const ManageUsersScreen(),
-            // 🛑 المسار الجديد لتقارير الطلبات
             '/sales_report': (context) => const SalesOrdersReportScreen(),
+            
+            // 🛑 ملاحظة: صفحة الأداء يتم استدعاؤها عبر Navigator.push 
+            // ولكن يمكن تسجيل مسار لها هنا إذا أردت استدعاءها بـ Named Route لاحقاً
           },
         );
       },
