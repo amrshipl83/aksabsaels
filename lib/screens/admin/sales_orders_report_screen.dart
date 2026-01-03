@@ -15,18 +15,9 @@ class SalesOrdersReportScreen extends StatefulWidget {
 class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
-  
-  // بيانات الهيكل التنظيمي
   List<Map<String, dynamic>> _allReps = []; 
   List<String> _baseRepCodes = []; 
-  
-  // قيم الفلاتر
   String? _selectedRepCode;
-  DateTimeRange? _selectedDateRange;
-  String _activeFilterLabel = "كل التواريخ";
-
-  // تخزين البيانات الحالية للتصدير
-  List<DocumentSnapshot> _currentOrders = [];
 
   @override
   void initState() {
@@ -60,7 +51,6 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
             .collection('managers')
             .where('managerId', isEqualTo: myDocId)
             .get();
-        
         List<String> supervisorIds = supervisors.docs.map((d) => d.id).toList();
         if (supervisorIds.isNotEmpty) {
           var reps = await FirebaseFirestore.instance
@@ -94,33 +84,6 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
     }
   }
 
-  Future<void> _pickDateRange() async {
-    DateTimeRange? picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2024),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
-    );
-    if (picked != null) {
-      setState(() {
-        _selectedDateRange = picked;
-        _activeFilterLabel = "${DateFormat('yyyy-MM-dd').format(picked.start)} إلى ${DateFormat('yyyy-MM-dd').format(picked.end)}";
-      });
-    }
-  }
-
-  void _exportToExcel() {
-    if (_currentOrders.isEmpty) return;
-
-    String csvData = "رقم الطلب,التاريخ,العميل,المندوب,الإجمالي\n";
-    for (var doc in _currentOrders) {
-      var d = doc.data() as Map<String, dynamic>;
-      var buyer = d['buyer'] as Map<String, dynamic>?;
-      csvData += "${doc.id},${_formatDate(d['orderDate'])},${buyer?['name'] ?? 'بدون اسم'},${buyer?['repName'] ?? '-'},${d['total']}\n";
-    }
-
-    Share.share(csvData, subject: 'تقرير مبيعات ${_activeFilterLabel}');
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -133,18 +96,12 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
         foregroundColor: const Color(0xFF2F3542),
         elevation: 0.5,
         centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.share, color: Colors.green),
-            onPressed: _exportToExcel,
-          )
-        ],
       ),
       body: Column(
         children: [
           _buildFilterBar(),
           Expanded(
-            child: _baseRepCodes.isEmpty ? _emptyState() : _buildOrdersStream(),
+            child: _baseRepCodes.isEmpty ? _emptyState("لا يوجد مناديب مسجلين") : _buildOrdersStream(),
           ),
         ],
       ),
@@ -159,36 +116,16 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            _filterChip(
-              label: _selectedRepCode == null ? "كل المناديب" : _allReps.firstWhere((r) => r['repCode'] == _selectedRepCode)['repName'],
-              icon: Icons.person,
-              onTap: _showRepSelector,
-              active: _selectedRepCode != null,
+            ActionChip(
+              avatar: const Icon(Icons.person, size: 16),
+              label: Text(_selectedRepCode == null ? "كل المناديب" : _allReps.firstWhere((r) => r['repCode'] == _selectedRepCode)['repName']),
+              onPressed: _showRepSelector,
             ),
-            const SizedBox(width: 10),
-            _filterChip(
-              label: _selectedDateRange == null ? "كل التواريخ" : _activeFilterLabel,
-              icon: Icons.calendar_today,
-              onTap: _pickDateRange,
-              active: _selectedDateRange != null,
-            ),
-            if (_selectedRepCode != null || _selectedDateRange != null)
-              IconButton(
-                icon: const Icon(Icons.refresh, color: Colors.red),
-                onPressed: () => setState(() { _selectedRepCode = null; _selectedDateRange = null; }),
-              )
+            if (_selectedRepCode != null)
+              IconButton(icon: const Icon(Icons.refresh, color: Colors.red), onPressed: () => setState(() => _selectedRepCode = null)),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _filterChip({required String label, required IconData icon, required VoidCallback onTap, bool active = false}) {
-    return ActionChip(
-      avatar: Icon(icon, size: 16, color: active ? Colors.white : Colors.grey),
-      label: Text(label, style: TextStyle(color: active ? Colors.white : Colors.black87, fontSize: 12)),
-      backgroundColor: active ? const Color(0xFF1ABC9C) : Colors.grey[200],
-      onPressed: onTap,
     );
   }
 
@@ -200,10 +137,7 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
         itemBuilder: (context, i) {
           if (i == 0) return ListTile(title: const Text("كل المناديب"), onTap: () { setState(() => _selectedRepCode = null); Navigator.pop(context); });
           var rep = _allReps[i - 1];
-          return ListTile(
-            title: Text(rep['repName']),
-            onTap: () { setState(() => _selectedRepCode = rep['repCode']); Navigator.pop(context); },
-          );
+          return ListTile(title: Text(rep['repName']), onTap: () { setState(() => _selectedRepCode = rep['repCode']); Navigator.pop(context); });
         },
       ),
     );
@@ -218,26 +152,31 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
       query = query.where('buyer.repCode', whereIn: _baseRepCodes);
     }
 
-    if (_selectedDateRange != null) {
-      query = query.where('orderDate', isGreaterThanOrEqualTo: _selectedDateRange!.start);
-      query = query.where('orderDate', isLessThanOrEqualTo: _selectedDateRange!.end.add(const Duration(days: 1)));
-    }
+    // 🛑 ملاحظة: تم حذف orderBy('orderDate') مؤقتاً لأن البيانات نصوص وليست Timestamps
+    // الترتيب سيتم يدوياً في القائمة لضمان ظهور البيانات
 
     return StreamBuilder<QuerySnapshot>(
-      stream: query.orderBy('orderDate', descending: true).snapshots(),
+      stream: query.snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return Center(child: Text("خطأ: ${snapshot.error}"));
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-        _currentOrders = snapshot.data!.docs;
-        if (_currentOrders.isEmpty) return _emptyState();
+        var orders = snapshot.data!.docs;
+        if (orders.isEmpty) return _emptyState("لا توجد طلبات لهذا الفلتر");
+
+        // ترتيب يدوي لأن orderDate نص
+        orders.sort((a, b) {
+          var dateA = (a.data() as Map)['orderDate']?.toString() ?? "";
+          var dateB = (b.data() as Map)['orderDate']?.toString() ?? "";
+          return dateB.compareTo(dateA);
+        });
 
         return ListView.builder(
           padding: const EdgeInsets.all(12),
-          itemCount: _currentOrders.length,
+          itemCount: orders.length,
           itemBuilder: (context, index) {
-            var data = _currentOrders[index].data() as Map<String, dynamic>;
-            return _orderCard(data, _currentOrders[index].id);
+            var data = orders[index].data() as Map<String, dynamic>;
+            return _orderCard(data, orders[index].id);
           },
         );
       },
@@ -250,11 +189,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ExpansionTile(
-        leading: const CircleAvatar(
-          backgroundColor: Color(0xFFF1F2F6),
-          child: Icon(Icons.receipt_long, color: Color(0xFF1ABC9C), size: 20),
-        ),
-        title: Text(buyer?['name'] ?? 'بدون اسم', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        leading: const CircleAvatar(backgroundColor: Color(0xFFF1F2F6), child: Icon(Icons.receipt, color: Color(0xFF1ABC9C))),
+        title: Text(buyer?['name'] ?? 'بدون اسم', style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text("القيمة: ${order['total']} ج.م", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
         children: [
           Padding(
@@ -262,19 +198,14 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _infoRow(Icons.numbers, "الرقم", id),
+                _infoRow(Icons.numbers, "رقم الطلب", id),
                 _infoRow(Icons.calendar_month, "التاريخ", _formatDate(order['orderDate'])),
                 _infoRow(Icons.person, "المندوب", buyer?['repName'] ?? '-'),
                 const Divider(),
-                ...((order['items'] as List? ?? []).map((item) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(item['productName'] ?? '', style: const TextStyle(fontSize: 12)),
-                      Text("x${item['quantity']}", style: const TextStyle(fontWeight: FontWeight.bold)),
-                    ],
-                  ),
+                ...((order['items'] as List? ?? []).map((item) => ListTile(
+                  dense: true,
+                  title: Text(item['name'] ?? 'منتج غير معروف'), // 👈 تم تعديلها لتطابق مستندك
+                  trailing: Text("الكمية: ${item['quantity']}"),
                 ))),
               ],
             ),
@@ -285,36 +216,22 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   }
 
   Widget _infoRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Icon(icon, size: 14, color: Colors.grey),
-          const SizedBox(width: 8),
-          Text("$label: ", style: const TextStyle(color: Colors.grey, fontSize: 11)),
-          Text(value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
+    return Row(children: [Icon(icon, size: 14, color: Colors.grey), const SizedBox(width: 8), Text("$label: $value", style: const TextStyle(fontSize: 12))]);
   }
 
-  Widget _emptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: const [
-          Icon(Icons.search_off, size: 50, color: Colors.grey),
-          SizedBox(height: 10),
-          Text("لا توجد نتائج بحث", style: TextStyle(color: Colors.grey)),
-        ],
-      ),
-    );
+  Widget _emptyState(String msg) {
+    return Center(child: Text(msg, style: const TextStyle(color: Colors.grey)));
   }
 
   String _formatDate(dynamic ts) {
     if (ts == null) return "-";
-    DateTime dt = (ts is Timestamp) ? ts.toDate() : DateTime.parse(ts.toString());
-    return DateFormat('yyyy-MM-dd').format(dt);
+    try {
+      // التعامل مع التاريخ كنص ISO
+      DateTime dt = DateTime.parse(ts.toString());
+      return DateFormat('yyyy-MM-dd HH:mm').format(dt);
+    } catch (e) {
+      return ts.toString();
+    }
   }
 }
 
