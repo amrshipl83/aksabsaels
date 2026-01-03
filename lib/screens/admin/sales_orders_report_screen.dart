@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart';
 
 class SalesOrdersReportScreen extends StatefulWidget {
   const SalesOrdersReportScreen({super.key});
@@ -15,8 +14,8 @@ class SalesOrdersReportScreen extends StatefulWidget {
 class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
-  List<Map<String, dynamic>> _allReps = []; 
-  List<String> _baseRepCodes = []; 
+  List<Map<String, dynamic>> _allReps = [];
+  List<String> _baseRepCodes = [];
   String? _selectedRepCode;
 
   @override
@@ -146,30 +145,31 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   Widget _buildOrdersStream() {
     Query query = FirebaseFirestore.instance.collection('orders');
 
+    // الفلترة حسب المندوب
     if (_selectedRepCode != null) {
       query = query.where('buyer.repCode', isEqualTo: _selectedRepCode);
     } else {
       query = query.where('buyer.repCode', whereIn: _baseRepCodes);
     }
 
-    // 🛑 ملاحظة: تم حذف orderBy('orderDate') مؤقتاً لأن البيانات نصوص وليست Timestamps
-    // الترتيب سيتم يدوياً في القائمة لضمان ظهور البيانات
+    // 🔥 الترتيب من السيرفر مباشرة (أسرع وأخف للتلفون)
+    query = query.orderBy('orderDate', descending: true);
 
     return StreamBuilder<QuerySnapshot>(
       stream: query.snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return Center(child: Text("خطأ: ${snapshot.error}"));
+        if (snapshot.hasError) {
+          // في حال ظهور خطأ الفهرس (Index) سيظهر هنا
+          return Center(child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Text("يرجى إنشاء الفهرس المطلوب في Firebase Console\n\nالخطأ: ${snapshot.error}", textAlign: TextAlign.center),
+          ));
+        }
+        
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
         var orders = snapshot.data!.docs;
-        if (orders.isEmpty) return _emptyState("لا توجد طلبات لهذا الفلتر");
-
-        // ترتيب يدوي لأن orderDate نص
-        orders.sort((a, b) {
-          var dateA = (a.data() as Map)['orderDate']?.toString() ?? "";
-          var dateB = (b.data() as Map)['orderDate']?.toString() ?? "";
-          return dateB.compareTo(dateA);
-        });
+        if (orders.isEmpty) return _emptyState("لا توجد طلبات حالياً");
 
         return ListView.builder(
           padding: const EdgeInsets.all(12),
@@ -190,8 +190,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ExpansionTile(
         leading: const CircleAvatar(backgroundColor: Color(0xFFF1F2F6), child: Icon(Icons.receipt, color: Color(0xFF1ABC9C))),
-        title: Text(buyer?['name'] ?? 'بدون اسم', style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text("القيمة: ${order['total']} ج.م", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+        title: Text(buyer?['name'] ?? 'بدون اسم', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        subtitle: Text("الإجمالي: ${order['total']} ج.م", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
         children: [
           Padding(
             padding: const EdgeInsets.all(12),
@@ -202,10 +202,12 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
                 _infoRow(Icons.calendar_month, "التاريخ", _formatDate(order['orderDate'])),
                 _infoRow(Icons.person, "المندوب", buyer?['repName'] ?? '-'),
                 const Divider(),
+                const Text("الأصناف المطلوبة:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                 ...((order['items'] as List? ?? []).map((item) => ListTile(
                   dense: true,
-                  title: Text(item['name'] ?? 'منتج غير معروف'), // 👈 تم تعديلها لتطابق مستندك
-                  trailing: Text("الكمية: ${item['quantity']}"),
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(item['name'] ?? 'منتج غير معروف', style: const TextStyle(fontSize: 12)),
+                  trailing: Text("الكمية: ${item['quantity']}", style: const TextStyle(fontWeight: FontWeight.bold)),
                 ))),
               ],
             ),
@@ -216,7 +218,15 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   }
 
   Widget _infoRow(IconData icon, String label, String value) {
-    return Row(children: [Icon(icon, size: 14, color: Colors.grey), const SizedBox(width: 8), Text("$label: $value", style: const TextStyle(fontSize: 12))]);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(children: [
+        Icon(icon, size: 14, color: Colors.grey), 
+        const SizedBox(width: 8), 
+        Text("$label: ", style: const TextStyle(color: Colors.grey, fontSize: 11)),
+        Expanded(child: Text(value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600))),
+      ]),
+    );
   }
 
   Widget _emptyState(String msg) {
@@ -225,13 +235,10 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
 
   String _formatDate(dynamic ts) {
     if (ts == null) return "-";
-    try {
-      // التعامل مع التاريخ كنص ISO
-      DateTime dt = DateTime.parse(ts.toString());
-      return DateFormat('yyyy-MM-dd HH:mm').format(dt);
-    } catch (e) {
-      return ts.toString();
+    if (ts is Timestamp) {
+      return DateFormat('yyyy-MM-dd HH:mm').format(ts.toDate());
     }
+    return ts.toString();
   }
 }
 
