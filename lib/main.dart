@@ -16,10 +16,10 @@ import 'screens/admin/live_monitoring_screen.dart';
 import 'screens/admin/manage_users_screen.dart';
 import 'screens/admin/sales_orders_report_screen.dart';
 import 'screens/admin/performance_dashboard_screen.dart';
-import 'screens/admin/customers_report_screen.dart';
+import 'screens/admin/customers_report_screen.dart'; 
 
 // ✅ إضافة استيراد شاشة العروض والجوائز الجديدة
-import 'screens/admin/offers_screen.dart';
+import 'screens/admin/offers_screen.dart';           
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,7 +30,7 @@ void main() async {
 }
 
 class AksabSalesApp extends StatelessWidget {
-  const AksabSalesApp({super.key});
+  const AksabSalesApp({super.key});                  
 
   @override
   Widget build(BuildContext context) {
@@ -71,13 +71,14 @@ class AksabSalesApp extends StatelessWidget {
             '/customers_report': (context) => const CustomersReportScreen(),
             
             // ✅ تسجيل مسار شاشة العروض الجديدة
-            '/offers': (context) => const OffersScreen(),
-
-            // ✅ إصلاح صفحة الأداء لاستقبال المعرف الممرر
+            '/offers': (context) => const OffersScreen(),                                                 
+            
+            // ✅ الإصلاح النهائي لصفحة الأداء (تمرير المتغيرين الإجباريين)
             '/performance_dashboard': (context) {
               final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
               return PerformanceDashboardScreen(
-                targetDocId: args?['targetDocId'] ?? '',
+                targetDocId: args?['targetDocId'] ?? '', // المتغير الأول
+                targetType: args?['targetType'] ?? 'rep', // المتغير الثاني الذي سبب الخطأ الأخير
               );
             },
           },
