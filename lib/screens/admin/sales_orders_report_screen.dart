@@ -26,11 +26,24 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   final Color kPrimaryColor = const Color(0xFF1ABC9C);
   final Color kSidebarColor = const Color(0xFF2F3542);
 
+  // تحديث الألوان لتشمل الحالات الجديدة
   final Map<String, Color> statusColors = {
-    'تم التسليم': const Color(0xFF2ECC71),
-    'قيد التنفيذ': const Color(0xFFF1C40F),
-    'ملغي': const Color(0xFFE74C3C),
+    'delivered': const Color(0xFF2ECC71),    // تم التسليم
+    'processing': const Color(0xFFF1C40F),   // قيد التجهيز
+    'cancelled': const Color(0xFFE74C3C),    // ملغى
+    'new-order': const Color(0xFF3498DB),     // طلب جديد
+    'shipped': const Color(0xFF9B59B6),       // تم الشحن
     'الكل': const Color(0xFF34495E),
+  };
+
+  // خريطة لترجمة الأكواد لأسماء عربية
+  final Map<String, String> statusNames = {
+    'new-order': 'طلب جديد',
+    'processing': 'قيد التجهيز',
+    'shipped': 'تم الشحن',
+    'delivered': 'تم التسليم',
+    'cancelled': 'ملغى',
+    'الكل': 'الكل',
   };
 
   @override
@@ -110,7 +123,7 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
 
   Widget _buildFilterPanel() {
     return Container(
-      margin: EdgeInsets.symmetric(horizontal: 5.w, vertical: 2.h),
+      margin: EdgeInsets.symmetric(horizontal: 5.w, vertical: 1.h),
       padding: EdgeInsets.all(4.w),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -126,11 +139,11 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
               _datePickerBtn("إلى تاريخ", _endDate, (d) => setState(() => _endDate = d!)),
             ],
           ),
-          SizedBox(height: 2.h),
+          SizedBox(height: 1.5.h),
           InkWell(
             onTap: _showRepSelector,
             child: Container(
-              padding: EdgeInsets.all(4.w),
+              padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 1.5.h),
               decoration: BoxDecoration(color: const Color(0xFFF1F2F6), borderRadius: BorderRadius.circular(15)),
               child: Row(
                 children: [
@@ -154,26 +167,29 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   }
 
   Widget _buildStatusQuickFilter() {
+    List<String> statuses = ['الكل', 'new-order', 'processing', 'shipped', 'delivered', 'cancelled'];
     return Container(
       height: 7.h,
-      margin: EdgeInsets.only(bottom: 1.h),
-      child: ListView(
+      margin: EdgeInsets.symmetric(vertical: 0.5.h),
+      child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.symmetric(horizontal: 5.w),
-        children: statusColors.keys.map((status) {
+        itemCount: statuses.length,
+        itemBuilder: (context, index) {
+          String status = statuses[index];
           bool isSelected = _statusFilter == status;
           return Padding(
             padding: EdgeInsets.only(left: 3.w),
             child: ChoiceChip(
-              padding: EdgeInsets.symmetric(horizontal: 3.w, vertical: 1.h),
-              label: Text(status, style: TextStyle(color: isSelected ? Colors.white : kSidebarColor, fontWeight: FontWeight.bold, fontSize: 13.sp)),
+              padding: EdgeInsets.symmetric(horizontal: 2.w),
+              label: Text(statusNames[status]!, style: TextStyle(color: isSelected ? Colors.white : kSidebarColor, fontWeight: FontWeight.bold, fontSize: 13.sp)),
               selected: isSelected,
               selectedColor: statusColors[status],
               backgroundColor: Colors.white,
               onSelected: (val) => setState(() => _statusFilter = status),
             ),
           );
-        }).toList(),
+        },
       ),
     );
   }
@@ -200,11 +216,13 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
       stream: query.snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasError) return _emptyState("خطأ في تحميل البيانات");
+        
         var orders = snapshot.data?.docs ?? [];
         if (orders.isEmpty) return _emptyState("لم يتم العثور على طلبات مطابقة");
 
         return ListView.builder(
-          padding: EdgeInsets.symmetric(horizontal: 5.w),
+          padding: EdgeInsets.fromLTRB(5.w, 0, 5.w, 2.h),
           itemCount: orders.length,
           itemBuilder: (context, index) {
             var data = orders[index].data() as Map<String, dynamic>;
@@ -218,7 +236,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   Widget _orderCard(Map<String, dynamic> order) {
     var buyer = order['buyer'] as Map<String, dynamic>?;
     String sellerName = order['sellerName'] ?? "مورد غير محدد";
-    String status = order['status'] ?? 'قيد التنفيذ';
+    String status = order['status'] ?? 'processing';
+    Color sColor = statusColors[status] ?? kSidebarColor;
 
     return Container(
       margin: EdgeInsets.only(bottom: 2.h),
@@ -228,22 +247,22 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 5))],
       ),
       child: ExpansionTile(
-        tilePadding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 1.h),
+        tilePadding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 0.5.h),
         leading: Container(
           padding: EdgeInsets.all(2.w),
-          decoration: BoxDecoration(color: statusColors[status]!.withOpacity(0.1), shape: BoxShape.circle),
-          child: Icon(Icons.shopping_cart_checkout_rounded, color: statusColors[status], size: 22.sp),
+          decoration: BoxDecoration(color: sColor.withOpacity(0.1), shape: BoxShape.circle),
+          child: Icon(Icons.shopping_cart_checkout_rounded, color: sColor, size: 22.sp),
         ),
         title: Row(
           children: [
             Expanded(child: Text(buyer?['name'] ?? 'عميل مجهول', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16.sp, color: kSidebarColor))),
-            _badge(sellerName, Colors.blueGrey),
+            _badge(statusNames[status] ?? status, sColor),
           ],
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(height: 1.h),
+            SizedBox(height: 0.5.h),
             Row(
               children: [
                 Icon(Icons.badge_outlined, size: 12.sp, color: kPrimaryColor),
@@ -251,7 +270,6 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
                 Text("المندوب: ${buyer?['repName'] ?? buyer?['repCode']}", style: TextStyle(fontSize: 13.sp, color: Colors.blueGrey, fontWeight: FontWeight.w600)),
               ],
             ),
-            SizedBox(height: 0.5.h),
             Text("${order['total']} ج.م", style: TextStyle(color: kPrimaryColor, fontWeight: FontWeight.w900, fontSize: 16.sp)),
           ],
         ),
@@ -264,9 +282,9 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
               children: [
                 _detailRow(Icons.warehouse_rounded, "المورد الأصلي", sellerName),
                 _detailRow(Icons.calendar_today_rounded, "تاريخ العملية", _formatDate(order['orderDate'])),
-                const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider()),
-                Text("قائمة الأصناف المباعة:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp, color: kSidebarColor)),
-                SizedBox(height: 1.5.h),
+                const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider()),
+                Text("قائمة الأصناف:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp, color: kSidebarColor)),
+                SizedBox(height: 1.h),
                 ...(order['items'] as List? ?? []).map((item) => Padding(
                   padding: EdgeInsets.symmetric(vertical: 0.5.h),
                   child: Row(
@@ -327,7 +345,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label, style: TextStyle(fontSize: 10.sp, color: Colors.grey)),
-              Text(DateFormat('yyyy-MM-dd').format(date), style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
+              // تكبير الخط هنا كما طلبت
+              Text(DateFormat('yyyy-MM-dd').format(date), style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
             ],
           ),
         ),
@@ -346,7 +365,7 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
           children: [
             Container(width: 10.w, height: 5, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
             SizedBox(height: 2.h),
-            Text("اختر المندوب لتحليل بياناته", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold)),
+            Text("اختر المندوب", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold)),
             const Divider(),
             Expanded(
               child: ListView.builder(
