@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
 // استيراد الصفحة الجديدة
-import 'performance_dashboard_screen.dart'; 
+import 'performance_dashboard_screen.dart';
 
 class ManageUsersScreen extends StatefulWidget {
   const ManageUsersScreen({super.key});
@@ -53,36 +53,35 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
 
     bool isManager = _userData?['role'] == 'sales_manager';
 
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF5F6FA),
-        appBar: AppBar(
-          title: Text("إدارة الموظفين والأداء", style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.white,
-          foregroundColor: kSidebarColor,
-          elevation: 0.5,
-          bottom: TabBar(
-            controller: _tabController,
-            labelColor: kPrimaryColor,
-            unselectedLabelColor: Colors.grey,
-            indicatorColor: kPrimaryColor,
-            tabs: isManager
-                ? [const Tab(text: "المشرفين"), const Tab(text: "جميع المندوبين")]
-                : [const Tab(text: "مندوبي المبيعات")],
-          ),
-        ),
-        body: TabBarView(
+    // 🛑 تم حذف Directionality هنا والبدء بـ Scaffold مباشرة
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: AppBar(
+        title: Text("إدارة الموظفين والأداء",
+            style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        foregroundColor: kSidebarColor,
+        elevation: 0.5,
+        bottom: TabBar(
           controller: _tabController,
-          children: isManager
-              ? [
-                  _buildUserList('managers', 'managerId'), 
-                  _buildUserList('salesRep', 'managerId')  
-                ]
-              : [
-                  _buildUserList('salesRep', 'supervisorId') 
-                ],
+          labelColor: kPrimaryColor,
+          unselectedLabelColor: Colors.grey,
+          indicatorColor: kPrimaryColor,
+          tabs: isManager
+              ? [const Tab(text: "المشرفين"), const Tab(text: "جميع المندوبين")]
+              : [const Tab(text: "مندوبي المبيعات")],
         ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: isManager
+            ? [
+                _buildUserList('managers', 'managerId'),
+                _buildUserList('salesRep', 'managerId')
+              ]
+            : [
+                _buildUserList('salesRep', 'supervisorId')
+              ],
       ),
     );
   }
@@ -119,8 +118,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
   Widget _buildUserCard(Map<String, dynamic> data, String docId, String collection) {
     String currentMonth = DateTime.now().toString().substring(0, 7);
     bool hasTarget = data['targets']?[currentMonth] != null;
-    
-    // تحديد النوع لتوجيه صفحة الأداء بشكل سليم
+
     String targetType = (collection == 'managers') ? 'sales_supervisor' : 'sales';
 
     return Card(
@@ -129,7 +127,6 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       child: InkWell(
         borderRadius: BorderRadius.circular(15),
-        // 🛑 الانتقال لصفحة الأداء عند الضغط على الكرت
         onTap: () {
           Navigator.push(
             context,
@@ -138,7 +135,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                 targetDocId: docId,
                 targetType: targetType,
                 targetName: data['fullname'] ?? 'غير معروف',
-                repCode: data['repCode'], // سيكون null للمشرف وسيتم التعامل معه هناك
+                repCode: data['repCode'],
               ),
             ),
           );
@@ -155,7 +152,8 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(data['fullname'] ?? 'بدون اسم',
-                          style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
+                          style: TextStyle(
+                              fontSize: 14.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
                       Text(targetType == 'sales_supervisor' ? "مشرف مبيعات" : "مندوب مبيعات",
                           style: TextStyle(fontSize: 9.sp, color: kPrimaryColor)),
                     ],
@@ -179,7 +177,10 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                       ),
                       SizedBox(width: 4.sp),
                       Text(hasTarget ? "هدف الشهر محدد" : "لم يحدد هدف",
-                          style: TextStyle(fontSize: 10.sp, color: hasTarget ? Colors.green : Colors.orange, fontWeight: FontWeight.w600)),
+                          style: TextStyle(
+                              fontSize: 10.sp,
+                              color: hasTarget ? Colors.green : Colors.orange,
+                              fontWeight: FontWeight.w600)),
                     ],
                   ),
                   ElevatedButton.icon(
@@ -214,7 +215,8 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
           Text(label, style: TextStyle(color: Colors.grey[500], fontSize: 11.sp)),
           SizedBox(width: 4.sp),
           Expanded(
-            child: Text(value,
+            child: Text(
+              value,
               style: TextStyle(color: kSidebarColor, fontWeight: FontWeight.w500, fontSize: 11.sp),
               overflow: TextOverflow.ellipsis,
             ),
@@ -237,16 +239,16 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-              controller: financialCtrl, 
-              decoration: const InputDecoration(labelText: "الهدف المالي المطلوب (جنيه)", prefixIcon: Icon(Icons.money)), 
-              keyboardType: TextInputType.number
-            ),
+                controller: financialCtrl,
+                decoration: const InputDecoration(
+                    labelText: "الهدف المالي المطلوب (جنيه)", prefixIcon: Icon(Icons.money)),
+                keyboardType: TextInputType.number),
             SizedBox(height: 10.sp),
             TextField(
-              controller: visitsCtrl, 
-              decoration: const InputDecoration(labelText: "عدد الزيارات المستهدف", prefixIcon: Icon(Icons.location_on)), 
-              keyboardType: TextInputType.number
-            ),
+                controller: visitsCtrl,
+                decoration: const InputDecoration(
+                    labelText: "عدد الزيارات المستهدف", prefixIcon: Icon(Icons.location_on)),
+                keyboardType: TextInputType.number),
           ],
         ),
         actions: [

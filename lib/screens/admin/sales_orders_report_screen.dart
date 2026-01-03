@@ -47,35 +47,31 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
 
     try {
       if (role == 'sales_manager') {
-        // 1. جلب كل المشرفين التابعين لهذا المدير
         var supervisors = await FirebaseFirestore.instance
             .collection('managers')
             .where('managerId', isEqualTo: myDocId)
             .get();
-        
         List<String> supervisorIds = supervisors.docs.map((d) => d.id).toList();
-        
-        // 2. جلب كل المناديب التابعين لهؤلاء المشرفين
+
         if (supervisorIds.isNotEmpty) {
           var reps = await FirebaseFirestore.instance
               .collection('salesRep')
               .where('supervisorId', whereIn: supervisorIds)
               .get();
           repsData = reps.docs.map((d) => {
-            'repCode': d.data().containsKey('repCode') ? d['repCode'].toString() : '',
-            'repName': d.data().containsKey('fullname') ? d['fullname'] : 'غير مسمى' // تصحيح من repName إلى fullname
-          }).toList();
+                'repCode': d.data().containsKey('repCode') ? d['repCode'].toString() : '',
+                'repName': d.data().containsKey('fullname') ? d['fullname'] : 'غير مسمى'
+              }).toList();
         }
       } else if (role == 'sales_supervisor') {
-        // جلب المناديب التابعين لهذا المشرف مباشرة
         var reps = await FirebaseFirestore.instance
             .collection('salesRep')
             .where('supervisorId', isEqualTo: myDocId)
             .get();
         repsData = reps.docs.map((d) => {
-          'repCode': d.data().containsKey('repCode') ? d['repCode'].toString() : '',
-          'repName': d.data().containsKey('fullname') ? d['fullname'] : 'غير مسمى'
-        }).toList();
+              'repCode': d.data().containsKey('repCode') ? d['repCode'].toString() : '',
+              'repName': d.data().containsKey('fullname') ? d['fullname'] : 'غير مسمى'
+            }).toList();
       }
 
       if (mounted) {
@@ -96,27 +92,25 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   Widget build(BuildContext context) {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF5F6FA),
-        appBar: AppBar(
-          title: Text("تقرير الطلبات", style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.white,
-          foregroundColor: const Color(0xFF2F3542),
-          elevation: 0.5,
-          centerTitle: true,
-        ),
-        body: Column(
-          children: [
-            _buildFilterBar(),
-            Expanded(
-              child: _baseRepCodes.isEmpty 
-                  ? _emptyState("لا يوجد مناديب مسجلين تحت إدارتك") 
-                  : _buildOrdersStream(),
-            ),
-          ],
-        ),
+    // 🛑 تم حذف Directionality هنا للبدء بـ Scaffold مباشرة وتجنب خطأ الـ Build
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: AppBar(
+        title: Text("تقرير الطلبات", style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF2F3542),
+        elevation: 0.5,
+        centerTitle: true,
+      ),
+      body: Column(
+        children: [
+          _buildFilterBar(),
+          Expanded(
+            child: _baseRepCodes.isEmpty
+                ? _emptyState("لا يوجد مناديب مسجلين تحت إدارتك")
+                : _buildOrdersStream(),
+          ),
+        ],
       ),
     );
   }
@@ -133,9 +127,9 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
               backgroundColor: const Color(0xFFF1F2F6),
               avatar: Icon(Icons.person, size: 14.sp, color: const Color(0xFF1ABC9C)),
               label: Text(
-                _selectedRepCode == null 
-                  ? "كل المناديب (${_allReps.length})" 
-                  : _allReps.firstWhere((r) => r['repCode'] == _selectedRepCode)['repName'],
+                _selectedRepCode == null
+                    ? "كل المناديب (${_allReps.length})"
+                    : _allReps.firstWhere((r) => r['repCode'] == _selectedRepCode)['repName'],
                 style: TextStyle(fontSize: 11.sp),
               ),
               onPressed: _showRepSelector,
@@ -143,9 +137,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
           ),
           if (_selectedRepCode != null)
             IconButton(
-              icon: Icon(Icons.highlight_off, color: Colors.redAccent, size: 20.sp),
-              onPressed: () => setState(() => _selectedRepCode = null)
-            ),
+                icon: Icon(Icons.highlight_off, color: Colors.redAccent, size: 20.sp),
+                onPressed: () => setState(() => _selectedRepCode = null)),
         ],
       ),
     );
@@ -170,7 +163,10 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
                   return ListTile(
                     title: const Text("كل المناديب"),
                     leading: const Icon(Icons.group),
-                    onTap: () { setState(() => _selectedRepCode = null); Navigator.pop(context); },
+                    onTap: () {
+                      setState(() => _selectedRepCode = null);
+                      Navigator.pop(context);
+                    },
                   );
                 }
                 var rep = _allReps[i - 1];
@@ -178,7 +174,10 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
                   title: Text(rep['repName']),
                   leading: const Icon(Icons.person_outline),
                   trailing: _selectedRepCode == rep['repCode'] ? const Icon(Icons.check, color: Colors.green) : null,
-                  onTap: () { setState(() => _selectedRepCode = rep['repCode']); Navigator.pop(context); },
+                  onTap: () {
+                    setState(() => _selectedRepCode = rep['repCode']);
+                    Navigator.pop(context);
+                  },
                 );
               },
             ),
@@ -190,11 +189,9 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
 
   Widget _buildOrdersStream() {
     Query query = FirebaseFirestore.instance.collection('orders');
-
     if (_selectedRepCode != null) {
       query = query.where('buyer.repCode', isEqualTo: _selectedRepCode);
     } else {
-      // جلب أوردرات كل المناديب التابعين (الكتلة)
       query = query.where('buyer.repCode', whereIn: _baseRepCodes);
     }
 
@@ -204,7 +201,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
       stream: query.snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(child: Padding(
+          return Center(
+              child: Padding(
             padding: const EdgeInsets.all(20.0),
             child: Text("خطأ في البيانات: ${snapshot.error}", textAlign: TextAlign.center),
           ));
@@ -236,12 +234,10 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ExpansionTile(
         leading: CircleAvatar(
-          backgroundColor: const Color(0xFFF1F2F6),
-          child: Icon(Icons.receipt_long, color: const Color(0xFF1ABC9C), size: 18.sp)
-        ),
-        title: Text(buyer?['name'] ?? 'عميل مجهول', 
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp)),
-        subtitle: Text("الإجمالي: ${order['total']} ج.م", 
+            backgroundColor: const Color(0xFFF1F2F6),
+            child: Icon(Icons.receipt_long, color: const Color(0xFF1ABC9C), size: 18.sp)),
+        title: Text(buyer?['name'] ?? 'عميل مجهول', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp)),
+        subtitle: Text("الإجمالي: ${order['total']} ج.م",
             style: TextStyle(color: Colors.blue[800], fontWeight: FontWeight.bold, fontSize: 11.sp)),
         children: [
           Padding(
@@ -255,11 +251,12 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
                 const Divider(),
                 Text("الأصناف:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.sp)),
                 ...((order['items'] as List? ?? []).map((item) => ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(item['name'] ?? 'منتج', style: TextStyle(fontSize: 10.sp)),
-                  trailing: Text("الكمية: ${item['quantity']}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.sp)),
-                ))),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(item['name'] ?? 'منتج', style: TextStyle(fontSize: 10.sp)),
+                      trailing: Text("الكمية: ${item['quantity']}",
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.sp)),
+                    ))),
               ],
             ),
           )
@@ -281,7 +278,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   }
 
   Widget _emptyState(String msg) {
-    return Center(child: Column(
+    return Center(
+        child: Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Icon(Icons.inbox_rounded, size: 40.sp, color: Colors.grey[300]),

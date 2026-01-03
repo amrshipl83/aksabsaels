@@ -26,7 +26,6 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
   DateTime _endDate = DateTime.now();
   bool _isLoading = true;
 
-  // متغيرات تجميع البيانات
   double totalSales = 0;
   int totalOrders = 0;
   int activeCustomers = 0;
@@ -42,32 +41,28 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
   Future<void> _fetchData() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
-    
+
     try {
       List<String> codesToQuery = [];
 
       // 1. تحديد الـ repCodes المطلوبة (الكتلة المجمعة)
       if (widget.targetType == 'sales_supervisor') {
-        // جلب مناديب المشرف
         var reps = await FirebaseFirestore.instance
-            .collection('sales_reps') // تأكد من اسم الكولكشن لديك
+            .collection('salesRep') // تم التأكد من اسم الكولكشن الموحد
             .where('supervisorId', isEqualTo: widget.targetDocId)
             .get();
         codesToQuery = reps.docs.map((d) => d['repCode']?.toString() ?? '').toList();
-        
-        // جلب أهداف المشرف من مجموعة managers
+
         var supervisorDoc = await FirebaseFirestore.instance.collection('managers').doc(widget.targetDocId).get();
         targets = supervisorDoc.data()?['targets'] ?? {};
       } else {
-        // مندوب واحد فقط
         codesToQuery = [widget.repCode ?? ''];
-        var repDoc = await FirebaseFirestore.instance.collection('sales_reps').doc(widget.targetDocId).get();
+        var repDoc = await FirebaseFirestore.instance.collection('salesRep').doc(widget.targetDocId).get();
         targets = repDoc.data()?['targets'] ?? {};
       }
 
-      // 2. استعلام الأوردرات المجمع (الكتلة الواحدة)
+      // 2. استعلام الأوردرات المجمع
       if (codesToQuery.isNotEmpty) {
-        // ملاحظة: Firestore يسمح بـ whereIn حتى 30 عنصراً
         var orders = await FirebaseFirestore.instance
             .collection('orders')
             .where('buyer.repCode', whereIn: codesToQuery)
@@ -91,9 +86,8 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         }
       }
 
-      // 3. حساب ساعات العمل (للمشرف أو المندوب نفسه بالـ repCode الخاص به)
-      // نستخدم الـ repCode الممرر أو معرف الوثيقة إذا كان هو المخزن في الـ logs
-      String selfCode = widget.repCode ?? widget.targetDocId; 
+      // 3. حساب ساعات العمل
+      String selfCode = widget.repCode ?? widget.targetDocId;
       var logs = await FirebaseFirestore.instance
           .collection('daily_logs')
           .where('repCode', isEqualTo: selfCode)
@@ -109,7 +103,6 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         }
       }
       if (mounted) setState(() => workingHours = hours);
-
     } catch (e) {
       debugPrint("Error fetching performance: $e");
     } finally {
@@ -122,19 +115,18 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     String currentMonth = DateFormat('yyyy-MM').format(DateTime.now());
     var currentTarget = targets[currentMonth] ?? {};
 
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF5F6FA),
-        appBar: AppBar(
-          title: Text("أداء ${widget.targetName}", style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold)),
-          elevation: 0,
-          backgroundColor: Colors.white,
-          foregroundColor: const Color(0xFF2F3542),
-          centerTitle: true,
-        ),
-        body: _isLoading 
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFFf57c00)))
+    // 🛑 تم حذف Directionality لأن الاتجاه محدد عالمياً في main.dart
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: AppBar(
+        title: Text("أداء ${widget.targetName}", style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold)),
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF2F3542),
+        centerTitle: true,
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF1ABC9C)))
           : SingleChildScrollView(
               padding: EdgeInsets.all(12.sp),
               child: Column(
@@ -142,13 +134,13 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
                 children: [
                   _buildDateFilter(),
                   SizedBox(height: 3.h),
-                  Text("مؤشرات الأداء الرئيسية (KPIs)", style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                  Text("مؤشرات الأداء الرئيسية (KPIs)",
+                      style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
                   SizedBox(height: 2.h),
                   _buildKpiGrid(currentTarget),
                 ],
               ),
             ),
-      ),
     );
   }
 
@@ -164,11 +156,17 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           _dateTile("من تاريخ", _startDate, (date) {
-            if (date != null) { setState(() => _startDate = date); _fetchData(); }
+            if (date != null) {
+              setState(() => _startDate = date);
+              _fetchData();
+            }
           }),
           Container(width: 1, height: 30, color: Colors.grey[200]),
           _dateTile("إلى تاريخ", _endDate, (date) {
-            if (date != null) { setState(() => _endDate = date); _fetchData(); }
+            if (date != null) {
+              setState(() => _endDate = date);
+              _fetchData();
+            }
           }),
           CircleAvatar(
             backgroundColor: const Color(0xFF1ABC9C).withOpacity(0.1),
@@ -190,10 +188,6 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
           initialDate: date,
           firstDate: DateTime(2025),
           lastDate: DateTime(2030),
-          builder: (context, child) => Theme(
-            data: ThemeData.light().copyWith(primaryColor: const Color(0xFFf57c00)),
-            child: child!,
-          ),
         );
         onSelect(picked);
       },
@@ -201,8 +195,8 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label, style: TextStyle(fontSize: 9.sp, color: Colors.grey)),
-          Text(DateFormat('yyyy-MM-dd').format(date), 
-               style: TextStyle(fontSize: 10.sp, fontWeight: FontWeight.bold, color: const Color(0xFF2F3542))),
+          Text(DateFormat('yyyy-MM-dd').format(date),
+              style: TextStyle(fontSize: 10.sp, fontWeight: FontWeight.bold, color: const Color(0xFF2F3542))),
         ],
       ),
     );
@@ -224,7 +218,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         _kpiCard("عدد الأوردرات", totalOrders.toDouble(), 0),
         _kpiCard("عملاء فعالين", activeCustomers.toDouble(), 0),
         _kpiCard("ساعات العمل", workingHours, 0, unit: "ساعة"),
-        _kpiCard("الزيارات المنفذة", 0, visitsGoal.toDouble(), unit: "زيارة"), 
+        _kpiCard("الزيارات المنفذة", 0, visitsGoal.toDouble(), unit: "زيارة"),
       ],
     );
   }
@@ -238,7 +232,6 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 5))],
       ),
       child: Column(
@@ -249,7 +242,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
           FittedBox(
             child: Text(
               isCurrency ? "${NumberFormat("#,###").format(actual)} ج.م" : "${actual.toStringAsFixed(1)} $unit",
-              style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w900, color: const Color(0xFFf57c00)),
+              style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w900, color: const Color(0xFF1ABC9C)),
             ),
           ),
           if (goal > 0) ...[
@@ -258,7 +251,11 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text("الهدف: ${goal.toInt()}", style: TextStyle(fontSize: 8.sp, color: Colors.grey)),
-                Text("${(percentage * 100).toInt()}%", style: TextStyle(fontSize: 8.sp, fontWeight: FontWeight.bold, color: percentage >= 1 ? Colors.green : Colors.orange)),
+                Text("${(percentage * 100).toInt()}%",
+                    style: TextStyle(
+                        fontSize: 8.sp,
+                        fontWeight: FontWeight.bold,
+                        color: percentage >= 1 ? Colors.green : Colors.orange)),
               ],
             ),
             SizedBox(height: 5.sp),
@@ -267,9 +264,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
               child: LinearProgressIndicator(
                 value: displayProgress,
                 backgroundColor: Colors.grey[100],
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  percentage >= 1 ? Colors.green : const Color(0xFFf57c00)
-                ),
+                valueColor: AlwaysStoppedAnimation<Color>(percentage >= 1 ? Colors.green : const Color(0xFF1ABC9C)),
                 minHeight: 5.sp,
               ),
             ),
