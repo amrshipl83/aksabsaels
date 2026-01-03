@@ -8,7 +8,7 @@ import 'package:sizer/sizer.dart';
 // استيراد الصفحات التابعة
 import 'sales_orders_report_screen.dart';
 import 'customers_report_screen.dart';
-import 'offers_screen.dart'; // إضافة الاستيراد
+import 'offers_screen.dart';
 
 class SalesManagementDashboard extends StatefulWidget {
   const SalesManagementDashboard({super.key});
@@ -21,9 +21,13 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
   String? _errorMsg;
+
+  // لوحة الألوان المحدثة لروح Material 3 واحترافية أكثر
   final Color kPrimaryColor = const Color(0xFF1ABC9C);
   final Color kSidebarColor = const Color(0xFF2F3542);
-  final Color kBgColor = const Color(0xFFF5F6FA);
+  final Color kBgColor = const Color(0xFFF8F9FD); // خلفية أفتح قليلاً لإبراز الكروت
+  final Color kCardColor = Colors.white;
+
   int totalOrders = 0;
   double totalSales = 0;
   int totalAgents = 0;
@@ -101,13 +105,6 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
           totalSales = salesSum;
           avgRating = ratedCount > 0 ? (ratingSum / ratedCount) : 0;
         });
-      } else {
-        setState(() {
-          totalOrders = 0;
-          totalSales = 0;
-          totalAgents = 0;
-          avgRating = 0;
-        });
       }
     } catch (e) {
       debugPrint("Firestore Stats Error: $e");
@@ -120,59 +117,71 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     if (_errorMsg != null) {
       return Scaffold(body: Center(child: Text("خطأ: $_errorMsg", style: const TextStyle(color: Colors.red))));
     }
+
     String role = _userData?['role'] ?? '';
     String staffTitle = (role == 'sales_manager') ? "المشرفين والمناديب" : "المناديب";
+
     return Scaffold(
       backgroundColor: kBgColor,
       appBar: AppBar(
-        title: Text("لوحة التحكم", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold)),
+        title: Text("لوحة التحكم", 
+          style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
         backgroundColor: Colors.white,
         foregroundColor: kSidebarColor,
-        elevation: 0.5,
+        elevation: 0,
+        centerTitle: true,
         leading: Builder(builder: (context) {
           return IconButton(
-            icon: Icon(Icons.menu, size: 22.sp),
+            icon: Icon(Icons.menu_open_rounded, size: 24.sp), // أيقونة M3 أكثر عصرية
             onPressed: () => Scaffold.of(context).openDrawer(),
           );
         }),
       ),
       drawer: _buildDrawer(staffTitle),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 2.h),
-        child: Column(
-          children: [
-            _buildWelcomeSection(),
-            SizedBox(height: 3.h),
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              crossAxisSpacing: 3.w,
-              mainAxisSpacing: 3.w,
-              childAspectRatio: 1.1,
-              children: [
-                _buildStatCard("إجمالي الطلبات", "$totalOrders", Icons.shopping_basket, Colors.blue),
-                _buildStatCard("إجمالي المبيعات", "${totalSales.toInt()}", Icons.monetization_on, Colors.green),
-                _buildStatCard("عدد المندوبين", "$totalAgents", Icons.people, Colors.orange),
-                _buildStatCard("متوسط التقييم", avgRating.toStringAsFixed(1), Icons.star, Colors.amber),
-              ],
-            ),
-            SizedBox(height: 4.h),
-            // ✅ إضافة زر العروض الجديد
-            _buildQuickAction(Icons.card_giftcard, "مركز العروض والجوائز", () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
-            }),
-            // ⬇️ الأيقونات الأصلية كما هي تماماً ⬇️
-            _buildQuickAction(Icons.sensors, "تتبع المندوبين لايف", () {
-              Navigator.pushNamed(context, '/live_monitoring');
-            }),
-            _buildQuickAction(Icons.manage_accounts, staffTitle, () {
-              Navigator.pushNamed(context, '/manage_users');
-            }),
-            _buildQuickAction(Icons.people, "تقرير العملاء والمسحوبات", () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => const CustomersReportScreen()));
-            }),
-          ],
+      body: SafeArea( // الحفاظ على المساحات الآمنة
+        child: SingleChildScrollView(
+          padding: EdgeInsets.symmetric(horizontal: 5.w, vertical: 2.h),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildWelcomeSection(),
+              SizedBox(height: 3.5.h),
+              Text("إحصائيات الأداء", 
+                style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: kSidebarColor.withOpacity(0.8))),
+              SizedBox(height: 1.5.h),
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 2,
+                crossAxisSpacing: 4.w,
+                mainAxisSpacing: 4.w,
+                childAspectRatio: 1.0, // جعل الكروت مربعة أكثر لاتزان التصميم
+                children: [
+                  _buildStatCard("إجمالي الطلبات", "$totalOrders", Icons.shopping_bag_outlined, const Color(0xFF3498DB)),
+                  _buildStatCard("إجمالي المبيعات", "${totalSales.toInt()}", Icons.account_balance_wallet_outlined, const Color(0xFF2ECC71)),
+                  _buildStatCard("عدد المندوبين", "$totalAgents", Icons.groups_2_outlined, const Color(0xFFE67E22)),
+                  _buildStatCard("متوسط التقييم", avgRating.toStringAsFixed(1), Icons.star_border_rounded, const Color(0xFFF1C40F)),
+                ],
+              ),
+              SizedBox(height: 4.h),
+              Text("الوصول السريع", 
+                style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: kSidebarColor.withOpacity(0.8))),
+              SizedBox(height: 1.5.h),
+              // القائمة أصبحت أكثر بروزاً بظلال ناعمة ومساحات واسعة
+              _buildQuickAction(Icons.card_giftcard_rounded, "مركز العروض والجوائز", () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
+              }),
+              _buildQuickAction(Icons.sensors_rounded, "تتبع المندوبين لايف", () {
+                Navigator.pushNamed(context, '/live_monitoring');
+              }),
+              _buildQuickAction(Icons.manage_accounts_outlined, staffTitle, () {
+                Navigator.pushNamed(context, '/manage_users');
+              }),
+              _buildQuickAction(Icons.analytics_outlined, "تقرير العملاء والمسحوبات", () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const CustomersReportScreen()));
+              }),
+            ],
+          ),
         ),
       ),
     );
@@ -180,17 +189,36 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Widget _buildWelcomeSection() {
     return Container(
-      padding: EdgeInsets.all(4.w),
-      decoration: BoxDecoration(color: kSidebarColor, borderRadius: BorderRadius.circular(15)),
+      padding: EdgeInsets.all(5.w),
+      decoration: BoxDecoration(
+        color: kSidebarColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: kSidebarColor.withOpacity(0.3),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
+          )
+        ],
+      ),
       child: Row(
         children: [
-          CircleAvatar(radius: 6.w, backgroundColor: kPrimaryColor, child: Icon(Icons.person, color: Colors.white, size: 8.w)),
+          Container(
+            padding: EdgeInsets.all(1.w),
+            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: kPrimaryColor.withOpacity(0.5), width: 2)),
+            child: CircleAvatar(
+              radius: 7.w, 
+              backgroundColor: kPrimaryColor.withOpacity(0.1), 
+              child: Icon(Icons.person_2_rounded, color: kPrimaryColor, size: 10.w)
+            ),
+          ),
           SizedBox(width: 4.w),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text("مرحباً بك،", style: TextStyle(color: Colors.white70, fontSize: 13.sp)),
-              Text("${_userData?['fullname'] ?? 'مستخدم'}", style: TextStyle(color: Colors.white, fontSize: 16.sp, fontWeight: FontWeight.bold)),
+              Text("مرحباً بك،", style: TextStyle(color: Colors.white60, fontSize: 13.sp)),
+              Text("${_userData?['fullname'] ?? 'مستخدم'}", 
+                style: TextStyle(color: Colors.white, fontSize: 18.sp, fontWeight: FontWeight.w900)),
             ],
           ),
         ],
@@ -200,32 +228,57 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Widget _buildStatCard(String title, String value, IconData icon, Color color) {
     return Container(
+      padding: EdgeInsets.all(3.w),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+        color: kCardColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          )
+        ],
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 25.sp),
-          SizedBox(height: 1.h),
-          Text(title, style: TextStyle(fontSize: 11.sp, color: Colors.black54)),
-          Text(value, style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
+          Container(
+            padding: EdgeInsets.all(3.w),
+            decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
+            child: Icon(icon, color: color, size: 26.sp),
+          ),
+          SizedBox(height: 1.5.h),
+          Text(title, style: TextStyle(fontSize: 11.5.sp, color: Colors.blueGrey, fontWeight: FontWeight.w500)),
+          Text(value, style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.w900, color: kSidebarColor)),
         ],
       ),
     );
   }
 
   Widget _buildQuickAction(IconData icon, String title, VoidCallback onTap) {
-    return Card(
-      elevation: 1,
+    return Container(
       margin: EdgeInsets.only(bottom: 2.h),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          )
+        ],
+      ),
       child: ListTile(
-        leading: Icon(icon, color: kPrimaryColor, size: 20.sp),
-        title: Text(title, style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold)),
-        trailing: Icon(Icons.arrow_forward_ios, size: 12.sp),
+        contentPadding: EdgeInsets.symmetric(horizontal: 5.w, vertical: 0.8.h),
+        leading: Container(
+          padding: EdgeInsets.all(2.5.w),
+          decoration: BoxDecoration(color: kPrimaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+          child: Icon(icon, color: kPrimaryColor, size: 22.sp),
+        ),
+        title: Text(title, style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w800, color: kSidebarColor)),
+        trailing: Icon(Icons.arrow_forward_ios_rounded, size: 14.sp, color: Colors.grey.shade400),
         onTap: onTap,
       ),
     );
@@ -233,44 +286,66 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Widget _buildDrawer(String staffTitle) {
     return Drawer(
-      child: Container(
-        color: kSidebarColor,
-        child: Column(
-          children: [
-            SizedBox(height: 8.h),
-            Text("أكسب - إدارة المبيعات", style: TextStyle(color: kPrimaryColor, fontSize: 16.sp, fontWeight: FontWeight.bold)),
-            const Divider(color: Colors.white24),
-            Expanded(
-              child: ListView(
-                children: [
-                  _drawerItem(Icons.dashboard, "الرئيسية", true, onTap: () => Navigator.pop(context)),
-                  // ✅ إضافة خيار العروض في القائمة الجانبية
-                  _drawerItem(Icons.card_giftcard, "مركز العروض", false, onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
-                  }),
-                  _drawerItem(Icons.receipt_long, "تقارير الطلبات", false, onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (context) => const SalesOrdersReportScreen()));
-                  }),
-                  _drawerItem(Icons.people, "العملاء", false, onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (context) => const CustomersReportScreen()));
-                  }),
-                  _drawerItem(Icons.manage_accounts, staffTitle, false, onTap: () {
-                    Navigator.pop(context);
-                    Navigator.pushNamed(context, '/manage_users');
-                  }),
-                  _drawerItem(Icons.logout, "تسجيل الخروج", false, color: Colors.redAccent, onTap: () async {
-                    await FirebaseAuth.instance.signOut();
-                    (await SharedPreferences.getInstance()).clear();
-                    if (mounted) Navigator.of(context).pushReplacementNamed('/');
-                  }),
-                ],
+      width: 75.w,
+      backgroundColor: kSidebarColor,
+      child: Column(
+        children: [
+          Container(
+            height: 25.h,
+            width: double.infinity,
+            padding: EdgeInsets.all(5.w),
+            decoration: BoxDecoration(
+              color: kSidebarColor,
+              image: DecorationImage(
+                image: const AssetImage('assets/images/pattern.png'), // إذا كان لديك نمط خلفية
+                opacity: 0.05,
+                fit: BoxFit.cover,
               ),
             ),
-          ],
-        ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("أكسب", style: TextStyle(color: kPrimaryColor, fontSize: 24.sp, fontWeight: FontWeight.w900)),
+                Text("إدارة المبيعات", style: TextStyle(color: Colors.white70, fontSize: 14.sp)),
+              ],
+            ),
+          ),
+          const Divider(color: Colors.white10, height: 1),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.symmetric(vertical: 2.h),
+              children: [
+                _drawerItem(Icons.dashboard_customize_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
+                _drawerItem(Icons.card_giftcard_rounded, "مركز العروض", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
+                }),
+                _drawerItem(Icons.assignment_outlined, "تقارير الطلبات", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const SalesOrdersReportScreen()));
+                }),
+                _drawerItem(Icons.person_pin_circle_outlined, "العملاء", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const CustomersReportScreen()));
+                }),
+                _drawerItem(Icons.admin_panel_settings_outlined, staffTitle, false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushNamed(context, '/manage_users');
+                }),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  child: Divider(color: Colors.white10),
+                ),
+                _drawerItem(Icons.logout_rounded, "تسجيل الخروج", false, color: Colors.redAccent, onTap: () async {
+                  await FirebaseAuth.instance.signOut();
+                  (await SharedPreferences.getInstance()).clear();
+                  if (mounted) Navigator.of(context).pushReplacementNamed('/');
+                }),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -278,8 +353,12 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   Widget _drawerItem(IconData icon, String title, bool active, {Color? color, VoidCallback? onTap}) {
     return ListTile(
       onTap: onTap,
-      leading: Icon(icon, color: color ?? (active ? kPrimaryColor : Colors.white70), size: 20.sp),
-      title: Text(title, style: TextStyle(color: color ?? Colors.white, fontSize: 14.sp)),
+      horizontalTitleGap: 0,
+      leading: Icon(icon, color: color ?? (active ? kPrimaryColor : Colors.white70), size: 22.sp),
+      title: Text(title, 
+        style: TextStyle(color: color ?? (active ? Colors.white : Colors.white70), 
+        fontSize: 15.sp, 
+        fontWeight: active ? FontWeight.w900 : FontWeight.w500)),
     );
   }
 }
