@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
-// استيراد الصفحة الجديدة
 import 'performance_dashboard_screen.dart';
 
 class ManageUsersScreen extends StatefulWidget {
@@ -18,6 +17,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
   TabController? _tabController;
   final Color kPrimaryColor = const Color(0xFF1ABC9C);
   final Color kSidebarColor = const Color(0xFF2F3542);
+  List<String> _mySupervisorsIds = []; // لتخزين معرفات المشرفين التابعين للمدير
 
   @override
   void initState() {
@@ -35,7 +35,26 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
           int tabCount = (_userData?['role'] == 'sales_manager') ? 2 : 1;
           _tabController = TabController(length: tabCount, vsync: this);
         });
+        
+        // إذا كان مديرًا، نحتاج جلب قائمة المشرفين التابعين له مسبقاً
+        if (_userData?['role'] == 'sales_manager') {
+          _fetchSupervisorsList();
+        }
       }
+    }
+  }
+
+  Future<void> _fetchSupervisorsList() async {
+    String myDocId = _userData?['docId'] ?? '';
+    var snapshot = await FirebaseFirestore.instance
+        .collection('managers')
+        .where('managerId', isEqualTo: myDocId)
+        .get();
+    
+    if (mounted) {
+      setState(() {
+        _mySupervisorsIds = snapshot.docs.map((d) => d.id).toList();
+      });
     }
   }
 
@@ -53,7 +72,6 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
 
     bool isManager = _userData?['role'] == 'sales_manager';
 
-    // 🛑 تم حذف Directionality هنا والبدء بـ Scaffold مباشرة
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
@@ -76,13 +94,28 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
         controller: _tabController,
         children: isManager
             ? [
-                _buildUserList('managers', 'managerId'),
-                _buildUserList('salesRep', 'managerId')
+                _buildUserList('managers', 'managerId'), // تبويب المشرفين
+                _buildAllRepsForManager(), // تبويب كل المندوبين (الحل الجديد)
               ]
             : [
-                _buildUserList('salesRep', 'supervisorId')
+                _buildUserList('salesRep', 'supervisorId') // المشرف يرى مناديبه
               ],
       ),
+    );
+  }
+
+  // دالة خاصة للمدير لجلب كل المندوبين التابعين لمشرفيه
+  Widget _buildAllRepsForManager() {
+    if (_mySupervisorsIds.isEmpty) {
+      return const Center(child: Text("لا يوجد مشرفين تابعين لك حالياً"));
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('salesRep')
+          .where('supervisorId', whereIn: _mySupervisorsIds)
+          .snapshots(),
+      builder: (context, snapshot) => _handleStreamResult(snapshot, 'salesRep'),
     );
   }
 
@@ -94,23 +127,26 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
           .collection(collectionName)
           .where(filterField, isEqualTo: myDocId)
           .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) return const Center(child: Text("حدث خطأ في جلب البيانات"));
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
+      builder: (context, snapshot) => _handleStreamResult(snapshot, collectionName),
+    );
+  }
 
-        var docs = snapshot.data?.docs ?? [];
-        if (docs.isEmpty) return const Center(child: Text("لا توجد سجلات حالياً"));
+  // توحيد معالجة نتائج الـ Stream
+  Widget _handleStreamResult(AsyncSnapshot<QuerySnapshot> snapshot, String collectionName) {
+    if (snapshot.hasError) return const Center(child: Text("حدث خطأ في جلب البيانات"));
+    if (snapshot.connectionState == ConnectionState.waiting) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
-        return ListView.builder(
-          padding: EdgeInsets.all(10.sp),
-          itemCount: docs.length,
-          itemBuilder: (context, index) {
-            var data = docs[index].data() as Map<String, dynamic>;
-            return _buildUserCard(data, docs[index].id, collectionName);
-          },
-        );
+    var docs = snapshot.data?.docs ?? [];
+    if (docs.isEmpty) return const Center(child: Text("لا توجد سجلات حالياً"));
+
+    return ListView.builder(
+      padding: EdgeInsets.all(10.sp),
+      itemCount: docs.length,
+      itemBuilder: (context, index) {
+        var data = docs[index].data() as Map<String, dynamic>;
+        return _buildUserCard(data, docs[index].id, collectionName);
       },
     );
   }
@@ -118,7 +154,6 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
   Widget _buildUserCard(Map<String, dynamic> data, String docId, String collection) {
     String currentMonth = DateTime.now().toString().substring(0, 7);
     bool hasTarget = data['targets']?[currentMonth] != null;
-
     String targetType = (collection == 'managers') ? 'sales_supervisor' : 'sales';
 
     return Card(
@@ -152,8 +187,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(data['fullname'] ?? 'بدون اسم',
-                          style: TextStyle(
-                              fontSize: 14.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
+                          style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
                       Text(targetType == 'sales_supervisor' ? "مشرف مبيعات" : "مندوب مبيعات",
                           style: TextStyle(fontSize: 9.sp, color: kPrimaryColor)),
                     ],
@@ -177,10 +211,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                       ),
                       SizedBox(width: 4.sp),
                       Text(hasTarget ? "هدف الشهر محدد" : "لم يحدد هدف",
-                          style: TextStyle(
-                              fontSize: 10.sp,
-                              color: hasTarget ? Colors.green : Colors.orange,
-                              fontWeight: FontWeight.w600)),
+                          style: TextStyle(fontSize: 10.sp, color: hasTarget ? Colors.green : Colors.orange, fontWeight: FontWeight.w600)),
                     ],
                   ),
                   ElevatedButton.icon(
@@ -215,8 +246,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
           Text(label, style: TextStyle(color: Colors.grey[500], fontSize: 11.sp)),
           SizedBox(width: 4.sp),
           Expanded(
-            child: Text(
-              value,
+            child: Text(value,
               style: TextStyle(color: kSidebarColor, fontWeight: FontWeight.w500, fontSize: 11.sp),
               overflow: TextOverflow.ellipsis,
             ),
@@ -239,16 +269,16 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-                controller: financialCtrl,
-                decoration: const InputDecoration(
-                    labelText: "الهدف المالي المطلوب (جنيه)", prefixIcon: Icon(Icons.money)),
-                keyboardType: TextInputType.number),
+              controller: financialCtrl, 
+              decoration: const InputDecoration(labelText: "الهدف المالي المطلوب (جنيه)", prefixIcon: Icon(Icons.money)), 
+              keyboardType: TextInputType.number
+            ),
             SizedBox(height: 10.sp),
             TextField(
-                controller: visitsCtrl,
-                decoration: const InputDecoration(
-                    labelText: "عدد الزيارات المستهدف", prefixIcon: Icon(Icons.location_on)),
-                keyboardType: TextInputType.number),
+              controller: visitsCtrl, 
+              decoration: const InputDecoration(labelText: "عدد الزيارات المستهدف", prefixIcon: Icon(Icons.location_on)), 
+              keyboardType: TextInputType.number
+            ),
           ],
         ),
         actions: [

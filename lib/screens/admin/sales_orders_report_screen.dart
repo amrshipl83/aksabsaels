@@ -19,6 +19,10 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   List<String> _baseRepCodes = [];
   String? _selectedRepCode;
 
+  // فلاتر التاريخ
+  DateTime _startDate = DateTime.now().subtract(const Duration(days: 7)); // افتراضياً آخر أسبوع
+  DateTime _endDate = DateTime.now();
+
   @override
   void initState() {
     super.initState();
@@ -92,7 +96,6 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   Widget build(BuildContext context) {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
-    // 🛑 تم حذف Directionality هنا للبدء بـ Scaffold مباشرة وتجنب خطأ الـ Build
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
@@ -104,7 +107,7 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
       ),
       body: Column(
         children: [
-          _buildFilterBar(),
+          _buildTopFilterBar(), // شريط الفلاتر الموحد
           Expanded(
             child: _baseRepCodes.isEmpty
                 ? _emptyState("لا يوجد مناديب مسجلين تحت إدارتك")
@@ -115,31 +118,78 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
     );
   }
 
-  Widget _buildFilterBar() {
+  Widget _buildTopFilterBar() {
     return Container(
-      width: double.infinity,
-      padding: EdgeInsets.symmetric(vertical: 10.sp, horizontal: 12.sp),
-      color: Colors.white,
-      child: Row(
+      padding: EdgeInsets.all(10.sp),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
+      ),
+      child: Column(
         children: [
-          Expanded(
-            child: ActionChip(
-              backgroundColor: const Color(0xFFF1F2F6),
-              avatar: Icon(Icons.person, size: 14.sp, color: const Color(0xFF1ABC9C)),
-              label: Text(
-                _selectedRepCode == null
-                    ? "كل المناديب (${_allReps.length})"
-                    : _allReps.firstWhere((r) => r['repCode'] == _selectedRepCode)['repName'],
-                style: TextStyle(fontSize: 11.sp),
-              ),
-              onPressed: _showRepSelector,
-            ),
+          // فلاتر التاريخ
+          Row(
+            children: [
+              _dateButton("من:", _startDate, (d) => setState(() => _startDate = d!)),
+              SizedBox(width: 8.sp),
+              _dateButton("إلى:", _endDate, (d) => setState(() => _endDate = d!)),
+            ],
           ),
-          if (_selectedRepCode != null)
-            IconButton(
-                icon: Icon(Icons.highlight_off, color: Colors.redAccent, size: 20.sp),
-                onPressed: () => setState(() => _selectedRepCode = null)),
+          const Divider(),
+          // اختيار المندوب
+          Row(
+            children: [
+              Expanded(
+                child: ActionChip(
+                  backgroundColor: const Color(0xFFF1F2F6),
+                  avatar: Icon(Icons.person, size: 14.sp, color: const Color(0xFF1ABC9C)),
+                  label: Text(
+                    _selectedRepCode == null
+                        ? "كل المناديب (${_allReps.length})"
+                        : _allReps.firstWhere((r) => r['repCode'] == _selectedRepCode)['repName'],
+                    style: TextStyle(fontSize: 10.sp),
+                  ),
+                  onPressed: _showRepSelector,
+                ),
+              ),
+              if (_selectedRepCode != null)
+                IconButton(
+                    icon: Icon(Icons.highlight_off, color: Colors.redAccent, size: 18.sp),
+                    onPressed: () => setState(() => _selectedRepCode = null)),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _dateButton(String label, DateTime date, Function(DateTime?) onSelect) {
+    return Expanded(
+      child: InkWell(
+        onTap: () async {
+          final picked = await showDatePicker(
+            context: context,
+            initialDate: date,
+            firstDate: DateTime(2025),
+            lastDate: DateTime.now(),
+          );
+          if (picked != null) onSelect(picked);
+        },
+        child: Container(
+          padding: EdgeInsets.symmetric(vertical: 6.sp, horizontal: 8.sp),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey[200]!),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Text(label, style: TextStyle(fontSize: 9.sp, color: Colors.grey)),
+              SizedBox(width: 4.sp),
+              Text(DateFormat('yyyy-MM-dd').format(date),
+                  style: TextStyle(fontSize: 9.sp, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -189,9 +239,16 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
 
   Widget _buildOrdersStream() {
     Query query = FirebaseFirestore.instance.collection('orders');
+
+    // تطبيق فلاتر التاريخ (هنا نحتاج حقل orderDate كـ Timestamp)
+    query = query
+        .where('orderDate', isGreaterThanOrEqualTo: Timestamp.fromDate(DateTime(_startDate.year, _startDate.month, _startDate.day)))
+        .where('orderDate', isLessThanOrEqualTo: Timestamp.fromDate(DateTime(_endDate.year, _endDate.month, _endDate.day, 23, 59, 59)));
+
+    // تطبيق فلاتر المندوب
     if (_selectedRepCode != null) {
       query = query.where('buyer.repCode', isEqualTo: _selectedRepCode);
-    } else {
+    } else if (_baseRepCodes.isNotEmpty) {
       query = query.where('buyer.repCode', whereIn: _baseRepCodes);
     }
 
@@ -201,11 +258,7 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
       stream: query.snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(
-              child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Text("خطأ في البيانات: ${snapshot.error}", textAlign: TextAlign.center),
-          ));
+          return Center(child: Text("خطأ: يرجى التأكد من وجود Index في Firestore"));
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -229,33 +282,31 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   Widget _orderCard(Map<String, dynamic> order, String id) {
     var buyer = order['buyer'] as Map<String, dynamic>?;
     return Card(
-      elevation: 2,
+      elevation: 1.5,
       margin: EdgeInsets.only(bottom: 10.sp),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ExpansionTile(
         leading: CircleAvatar(
             backgroundColor: const Color(0xFFF1F2F6),
-            child: Icon(Icons.receipt_long, color: const Color(0xFF1ABC9C), size: 18.sp)),
-        title: Text(buyer?['name'] ?? 'عميل مجهول', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp)),
-        subtitle: Text("الإجمالي: ${order['total']} ج.م",
-            style: TextStyle(color: Colors.blue[800], fontWeight: FontWeight.bold, fontSize: 11.sp)),
+            child: Icon(Icons.receipt_long, color: const Color(0xFF1ABC9C), size: 16.sp)),
+        title: Text(buyer?['name'] ?? 'عميل مجهول', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.sp)),
+        subtitle: Text("المبلغ: ${order['total']} ج.م",
+            style: TextStyle(color: Colors.blue[800], fontWeight: FontWeight.bold, fontSize: 10.sp)),
         children: [
           Padding(
-            padding: EdgeInsets.all(12.sp),
+            padding: EdgeInsets.all(10.sp),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _infoRow(Icons.numbers, "رقم الطلب", id),
-                _infoRow(Icons.calendar_month, "التاريخ", _formatDate(order['orderDate'])),
-                _infoRow(Icons.person, "المندوب", buyer?['repName'] ?? '-'),
+                _infoRow(Icons.calendar_month, "توقيت الطلب", _formatDate(order['orderDate'])),
+                _infoRow(Icons.person, "كود المندوب", buyer?['repCode'] ?? '-'),
                 const Divider(),
-                Text("الأصناف:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.sp)),
                 ...((order['items'] as List? ?? []).map((item) => ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       title: Text(item['name'] ?? 'منتج', style: TextStyle(fontSize: 10.sp)),
-                      trailing: Text("الكمية: ${item['quantity']}",
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.sp)),
+                      trailing: Text("سعر: ${item['price']} x ${item['quantity']}",
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 9.sp)),
                     ))),
               ],
             ),
@@ -282,7 +333,7 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
         child: Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(Icons.inbox_rounded, size: 40.sp, color: Colors.grey[300]),
+        Icon(Icons.event_busy, size: 40.sp, color: Colors.grey[300]),
         SizedBox(height: 10.sp),
         Text(msg, style: TextStyle(color: Colors.grey, fontSize: 12.sp)),
       ],
