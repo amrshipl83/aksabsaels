@@ -9,6 +9,7 @@ import 'package:sizer/sizer.dart';
 import 'sales_orders_report_screen.dart';
 import 'customers_report_screen.dart';
 import 'offers_screen.dart';
+import 'profile_screen.dart'; // تأكد من إنشاء هذا الملف بكود الملف الشخصي الذي قدمته لك سابقاً
 
 class SalesManagementDashboard extends StatefulWidget {
   const SalesManagementDashboard({super.key});
@@ -22,16 +23,15 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   bool _isLoading = true;
   String? _errorMsg;
 
-  // لوحة الألوان المحدثة لروح Material 3 واحترافية أكثر
   final Color kPrimaryColor = const Color(0xFF1ABC9C);
   final Color kSidebarColor = const Color(0xFF2F3542);
-  final Color kBgColor = const Color(0xFFF8F9FD); // خلفية أفتح قليلاً لإبراز الكروت
+  final Color kBgColor = const Color(0xFFF8F9FD);
   final Color kCardColor = Colors.white;
 
   int totalOrders = 0;
   double totalSales = 0;
   int totalAgents = 0;
-  double avgRating = 0;
+  int secondaryStat = 0; // متغير للإحصائية المتغيرة (عدد المشرفين أو العملاء)
 
   @override
   void initState() {
@@ -63,17 +63,29 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     try {
       List<String> repCodes = [];
       if (role == 'sales_supervisor') {
+        // للمشرف: نحسب عدد العملاء المرتبطين بمناديبه
         final agentsSnap = await FirebaseFirestore.instance
             .collection('salesRep')
             .where('supervisorId', isEqualTo: myDocId)
             .get();
         repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
         totalAgents = agentsSnap.size;
+
+        if (repCodes.isNotEmpty) {
+           final customersSnap = await FirebaseFirestore.instance
+              .collection('deliverySupermarkets') // استخدام الثابت المتفق عليه [cite: 2025-10-03]
+              .where('ownerId', whereIn: repCodes)
+              .get();
+           secondaryStat = customersSnap.size;
+        }
       } else if (role == 'sales_manager') {
+        // للمدير: نحسب عدد المشرفين التابعين له
         final supervisorsSnap = await FirebaseFirestore.instance
             .collection('managers')
             .where('managerId', isEqualTo: myDocId)
             .get();
+        secondaryStat = supervisorsSnap.size; // عدد المشرفين
+        
         List<String> supervisorIds = supervisorsSnap.docs.map((d) => d.id).toList();
         if (supervisorIds.isNotEmpty) {
           final agentsSnap = await FirebaseFirestore.instance
@@ -84,26 +96,19 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
           totalAgents = agentsSnap.size;
         }
       }
+
       if (repCodes.isNotEmpty) {
         final ordersSnap = await FirebaseFirestore.instance
             .collection('orders')
             .where('buyer.repCode', whereIn: repCodes)
             .get();
         double salesSum = 0;
-        double ratingSum = 0;
-        int ratedCount = 0;
         for (var doc in ordersSnap.docs) {
-          var d = doc.data();
-          salesSum += (d['total'] ?? 0).toDouble();
-          if (d['rating'] != null) {
-            ratingSum += (d['rating'] as num).toDouble();
-            ratedCount++;
-          }
+          salesSum += (doc.data()['total'] ?? 0).toDouble();
         }
         setState(() {
           totalOrders = ordersSnap.size;
           totalSales = salesSum;
-          avgRating = ratedCount > 0 ? (ratingSum / ratedCount) : 0;
         });
       }
     } catch (e) {
@@ -120,25 +125,25 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
     String role = _userData?['role'] ?? '';
     String staffTitle = (role == 'sales_manager') ? "المشرفين والمناديب" : "المناديب";
+    String secondaryStatTitle = (role == 'sales_manager') ? "عدد المشرفين" : "إجمالي العملاء";
 
     return Scaffold(
       backgroundColor: kBgColor,
       appBar: AppBar(
-        title: Text("لوحة التحكم", 
-          style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+        title: Text("لوحة التحكم", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.w900)),
         backgroundColor: Colors.white,
         foregroundColor: kSidebarColor,
         elevation: 0,
         centerTitle: true,
         leading: Builder(builder: (context) {
           return IconButton(
-            icon: Icon(Icons.menu_open_rounded, size: 24.sp), // أيقونة M3 أكثر عصرية
+            icon: Icon(Icons.menu_open_rounded, size: 24.sp),
             onPressed: () => Scaffold.of(context).openDrawer(),
           );
         }),
       ),
       drawer: _buildDrawer(staffTitle),
-      body: SafeArea( // الحفاظ على المساحات الآمنة
+      body: SafeArea(
         child: SingleChildScrollView(
           padding: EdgeInsets.symmetric(horizontal: 5.w, vertical: 2.h),
           child: Column(
@@ -146,8 +151,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             children: [
               _buildWelcomeSection(),
               SizedBox(height: 3.5.h),
-              Text("إحصائيات الأداء", 
-                style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: kSidebarColor.withOpacity(0.8))),
+              Text("إحصائيات الأداء", style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: kSidebarColor.withOpacity(0.8))),
               SizedBox(height: 1.5.h),
               GridView.count(
                 shrinkWrap: true,
@@ -155,19 +159,16 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
                 crossAxisCount: 2,
                 crossAxisSpacing: 4.w,
                 mainAxisSpacing: 4.w,
-                childAspectRatio: 1.0, // جعل الكروت مربعة أكثر لاتزان التصميم
                 children: [
                   _buildStatCard("إجمالي الطلبات", "$totalOrders", Icons.shopping_bag_outlined, const Color(0xFF3498DB)),
                   _buildStatCard("إجمالي المبيعات", "${totalSales.toInt()}", Icons.account_balance_wallet_outlined, const Color(0xFF2ECC71)),
                   _buildStatCard("عدد المندوبين", "$totalAgents", Icons.groups_2_outlined, const Color(0xFFE67E22)),
-                  _buildStatCard("متوسط التقييم", avgRating.toStringAsFixed(1), Icons.star_border_rounded, const Color(0xFFF1C40F)),
+                  _buildStatCard(secondaryStatTitle, "$secondaryStat", Icons.analytics_outlined, const Color(0xFF9B59B6)),
                 ],
               ),
               SizedBox(height: 4.h),
-              Text("الوصول السريع", 
-                style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: kSidebarColor.withOpacity(0.8))),
+              Text("الوصول السريع", style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: kSidebarColor.withOpacity(0.8))),
               SizedBox(height: 1.5.h),
-              // القائمة أصبحت أكثر بروزاً بظلال ناعمة ومساحات واسعة
               _buildQuickAction(Icons.card_giftcard_rounded, "مركز العروض والجوائز", () {
                 Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
               }),
@@ -177,7 +178,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               _buildQuickAction(Icons.manage_accounts_outlined, staffTitle, () {
                 Navigator.pushNamed(context, '/manage_users');
               }),
-              _buildQuickAction(Icons.analytics_outlined, "تقرير العملاء والمسحوبات", () {
+              _buildQuickAction(Icons.people_alt_outlined, "تقرير العملاء والمسحوبات", () {
                 Navigator.push(context, MaterialPageRoute(builder: (context) => const CustomersReportScreen()));
               }),
             ],
@@ -193,32 +194,21 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       decoration: BoxDecoration(
         color: kSidebarColor,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: kSidebarColor.withOpacity(0.3),
-            blurRadius: 15,
-            offset: const Offset(0, 8),
-          )
-        ],
+        boxShadow: [BoxShadow(color: kSidebarColor.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))],
       ),
       child: Row(
         children: [
-          Container(
-            padding: EdgeInsets.all(1.w),
-            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: kPrimaryColor.withOpacity(0.5), width: 2)),
-            child: CircleAvatar(
+          CircleAvatar(
               radius: 7.w, 
               backgroundColor: kPrimaryColor.withOpacity(0.1), 
               child: Icon(Icons.person_2_rounded, color: kPrimaryColor, size: 10.w)
-            ),
           ),
           SizedBox(width: 4.w),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text("مرحباً بك،", style: TextStyle(color: Colors.white60, fontSize: 13.sp)),
-              Text("${_userData?['fullname'] ?? 'مستخدم'}", 
-                style: TextStyle(color: Colors.white, fontSize: 18.sp, fontWeight: FontWeight.w900)),
+              Text("${_userData?['fullname'] ?? 'مستخدم'}", style: TextStyle(color: Colors.white, fontSize: 18.sp, fontWeight: FontWeight.w900)),
             ],
           ),
         ],
@@ -232,13 +222,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       decoration: BoxDecoration(
         color: kCardColor,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          )
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20, offset: const Offset(0, 10))],
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -248,9 +232,9 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
             child: Icon(icon, color: color, size: 26.sp),
           ),
-          SizedBox(height: 1.5.h),
-          Text(title, style: TextStyle(fontSize: 11.5.sp, color: Colors.blueGrey, fontWeight: FontWeight.w500)),
-          Text(value, style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.w900, color: kSidebarColor)),
+          SizedBox(height: 1.2.h),
+          Text(title, textAlign: TextAlign.center, style: TextStyle(fontSize: 10.sp, color: Colors.blueGrey, fontWeight: FontWeight.w600)),
+          Text(value, style: TextStyle(fontSize: 17.sp, fontWeight: FontWeight.w900, color: kSidebarColor)),
         ],
       ),
     );
@@ -262,13 +246,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          )
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 5))],
       ),
       child: ListTile(
         contentPadding: EdgeInsets.symmetric(horizontal: 5.w, vertical: 0.8.h),
@@ -286,7 +264,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Widget _buildDrawer(String staffTitle) {
     return Drawer(
-      width: 75.w,
+      width: 80.w,
       backgroundColor: kSidebarColor,
       child: Column(
         children: [
@@ -294,14 +272,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             height: 25.h,
             width: double.infinity,
             padding: EdgeInsets.all(5.w),
-            decoration: BoxDecoration(
-              color: kSidebarColor,
-              image: DecorationImage(
-                image: const AssetImage('assets/images/pattern.png'), // إذا كان لديك نمط خلفية
-                opacity: 0.05,
-                fit: BoxFit.cover,
-              ),
-            ),
+            alignment: Alignment.bottomRight,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.end,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -317,6 +288,10 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               padding: EdgeInsets.symmetric(vertical: 2.h),
               children: [
                 _drawerItem(Icons.dashboard_customize_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
+                _drawerItem(Icons.account_circle_outlined, "الملف الشخصي والإعدادات", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen()));
+                }),
                 _drawerItem(Icons.card_giftcard_rounded, "مركز العروض", false, onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
@@ -333,10 +308,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
                   Navigator.pop(context);
                   Navigator.pushNamed(context, '/manage_users');
                 }),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  child: Divider(color: Colors.white10),
-                ),
+                const Padding(padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10), child: Divider(color: Colors.white10)),
                 _drawerItem(Icons.logout_rounded, "تسجيل الخروج", false, color: Colors.redAccent, onTap: () async {
                   await FirebaseAuth.instance.signOut();
                   (await SharedPreferences.getInstance()).clear();
@@ -355,10 +327,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       onTap: onTap,
       horizontalTitleGap: 0,
       leading: Icon(icon, color: color ?? (active ? kPrimaryColor : Colors.white70), size: 22.sp),
-      title: Text(title, 
-        style: TextStyle(color: color ?? (active ? Colors.white : Colors.white70), 
-        fontSize: 15.sp, 
-        fontWeight: active ? FontWeight.w900 : FontWeight.w500)),
+      title: Text(title, style: TextStyle(color: color ?? (active ? Colors.white : Colors.white70), fontSize: 15.sp, fontWeight: active ? FontWeight.w900 : FontWeight.w500)),
     );
   }
 }

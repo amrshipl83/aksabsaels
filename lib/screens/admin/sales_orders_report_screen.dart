@@ -18,10 +18,20 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   List<Map<String, dynamic>> _allReps = [];
   List<String> _baseRepCodes = [];
   String? _selectedRepCode;
+  String _statusFilter = 'الكل';
 
-  // فلاتر التاريخ
-  DateTime _startDate = DateTime.now().subtract(const Duration(days: 7)); // افتراضياً آخر أسبوع
+  DateTime _startDate = DateTime.now().subtract(const Duration(days: 7));
   DateTime _endDate = DateTime.now();
+
+  final Color kPrimaryColor = const Color(0xFF1ABC9C);
+  final Color kSidebarColor = const Color(0xFF2F3542);
+
+  final Map<String, Color> statusColors = {
+    'تم التسليم': const Color(0xFF2ECC71),
+    'قيد التنفيذ': const Color(0xFFF1C40F),
+    'ملغي': const Color(0xFFE74C3C),
+    'الكل': const Color(0xFF34495E),
+  };
 
   @override
   void initState() {
@@ -48,48 +58,25 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
     String role = _userData?['role'] ?? '';
     String myDocId = _userData?['docId'] ?? '';
     List<Map<String, dynamic>> repsData = [];
-
     try {
       if (role == 'sales_manager') {
-        var supervisors = await FirebaseFirestore.instance
-            .collection('managers')
-            .where('managerId', isEqualTo: myDocId)
-            .get();
+        var supervisors = await FirebaseFirestore.instance.collection('managers').where('managerId', isEqualTo: myDocId).get();
         List<String> supervisorIds = supervisors.docs.map((d) => d.id).toList();
-
         if (supervisorIds.isNotEmpty) {
-          var reps = await FirebaseFirestore.instance
-              .collection('salesRep')
-              .where('supervisorId', whereIn: supervisorIds)
-              .get();
-          repsData = reps.docs.map((d) => {
-                'repCode': d.data().containsKey('repCode') ? d['repCode'].toString() : '',
-                'repName': d.data().containsKey('fullname') ? d['fullname'] : 'غير مسمى'
-              }).toList();
+          var reps = await FirebaseFirestore.instance.collection('salesRep').where('supervisorId', whereIn: supervisorIds).get();
+          repsData = reps.docs.map((d) => {'repCode': d['repCode'].toString(), 'repName': d['fullname']}).toList();
         }
       } else if (role == 'sales_supervisor') {
-        var reps = await FirebaseFirestore.instance
-            .collection('salesRep')
-            .where('supervisorId', isEqualTo: myDocId)
-            .get();
-        repsData = reps.docs.map((d) => {
-              'repCode': d.data().containsKey('repCode') ? d['repCode'].toString() : '',
-              'repName': d.data().containsKey('fullname') ? d['fullname'] : 'غير مسمى'
-            }).toList();
+        var reps = await FirebaseFirestore.instance.collection('salesRep').where('supervisorId', isEqualTo: myDocId).get();
+        repsData = reps.docs.map((d) => {'repCode': d['repCode'].toString(), 'repName': d['fullname']}).toList();
       }
-
       if (mounted) {
         setState(() {
           _allReps = repsData;
-          _baseRepCodes = repsData
-              .map((e) => e['repCode'] as String)
-              .where((c) => c.isNotEmpty)
-              .toList();
+          _baseRepCodes = repsData.map((e) => e['repCode'] as String).where((c) => c.isNotEmpty).toList();
         });
       }
-    } catch (e) {
-      debugPrint("Hierarchy Error: $e");
-    }
+    } catch (e) { debugPrint("Hierarchy Error: $e"); }
   }
 
   @override
@@ -97,96 +84,250 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F6FA),
+      backgroundColor: const Color(0xFFF8F9FD),
       appBar: AppBar(
-        title: Text("تقرير الطلبات", style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF2F3542),
-        elevation: 0.5,
+        title: Text("تقارير العمليات", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.w900)),
         centerTitle: true,
+        backgroundColor: Colors.white,
+        foregroundColor: kSidebarColor,
+        elevation: 0,
       ),
-      body: Column(
-        children: [
-          _buildTopFilterBar(), // شريط الفلاتر الموحد
-          Expanded(
-            child: _baseRepCodes.isEmpty
-                ? _emptyState("لا يوجد مناديب مسجلين تحت إدارتك")
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildFilterPanel(),
+            _buildStatusQuickFilter(),
+            Expanded(
+              child: _baseRepCodes.isEmpty 
+                ? _emptyState("لا يوجد مناديب مسجلين لإظهار تقاريرهم") 
                 : _buildOrdersStream(),
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildTopFilterBar() {
+  Widget _buildFilterPanel() {
     return Container(
-      padding: EdgeInsets.all(10.sp),
+      margin: EdgeInsets.symmetric(horizontal: 5.w, vertical: 2.h),
+      padding: EdgeInsets.all(4.w),
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 15, offset: const Offset(0, 5))],
       ),
       child: Column(
         children: [
-          // فلاتر التاريخ
           Row(
             children: [
-              _dateButton("من:", _startDate, (d) => setState(() => _startDate = d!)),
-              SizedBox(width: 8.sp),
-              _dateButton("إلى:", _endDate, (d) => setState(() => _endDate = d!)),
+              _datePickerBtn("من تاريخ", _startDate, (d) => setState(() => _startDate = d!)),
+              SizedBox(width: 4.w),
+              _datePickerBtn("إلى تاريخ", _endDate, (d) => setState(() => _endDate = d!)),
             ],
           ),
-          const Divider(),
-          // اختيار المندوب
-          Row(
-            children: [
-              Expanded(
-                child: ActionChip(
-                  backgroundColor: const Color(0xFFF1F2F6),
-                  avatar: Icon(Icons.person, size: 14.sp, color: const Color(0xFF1ABC9C)),
-                  label: Text(
-                    _selectedRepCode == null
-                        ? "كل المناديب (${_allReps.length})"
-                        : _allReps.firstWhere((r) => r['repCode'] == _selectedRepCode)['repName'],
-                    style: TextStyle(fontSize: 10.sp),
+          SizedBox(height: 2.h),
+          InkWell(
+            onTap: _showRepSelector,
+            child: Container(
+              padding: EdgeInsets.all(4.w),
+              decoration: BoxDecoration(color: const Color(0xFFF1F2F6), borderRadius: BorderRadius.circular(15)),
+              child: Row(
+                children: [
+                  Icon(Icons.person_pin_outlined, color: kPrimaryColor, size: 22.sp),
+                  SizedBox(width: 3.w),
+                  Expanded(
+                    child: Text(
+                      _selectedRepCode == null ? "كل المناديب المختصين" : _allReps.firstWhere((r) => r['repCode'] == _selectedRepCode)['repName'],
+                      style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  onPressed: _showRepSelector,
-                ),
+                  Icon(Icons.arrow_drop_down_circle_outlined, color: kSidebarColor, size: 18.sp),
+                ],
               ),
-              if (_selectedRepCode != null)
-                IconButton(
-                    icon: Icon(Icons.highlight_off, color: Colors.redAccent, size: 18.sp),
-                    onPressed: () => setState(() => _selectedRepCode = null)),
-            ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _dateButton(String label, DateTime date, Function(DateTime?) onSelect) {
+  Widget _buildStatusQuickFilter() {
+    return Container(
+      height: 7.h,
+      margin: EdgeInsets.only(bottom: 1.h),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.symmetric(horizontal: 5.w),
+        children: statusColors.keys.map((status) {
+          bool isSelected = _statusFilter == status;
+          return Padding(
+            padding: EdgeInsets.only(left: 3.w),
+            child: ChoiceChip(
+              padding: EdgeInsets.symmetric(horizontal: 3.w, vertical: 1.h),
+              label: Text(status, style: TextStyle(color: isSelected ? Colors.white : kSidebarColor, fontWeight: FontWeight.bold, fontSize: 13.sp)),
+              selected: isSelected,
+              selectedColor: statusColors[status],
+              backgroundColor: Colors.white,
+              onSelected: (val) => setState(() => _statusFilter = status),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildOrdersStream() {
+    Query query = FirebaseFirestore.instance.collection('orders');
+    query = query
+        .where('orderDate', isGreaterThanOrEqualTo: Timestamp.fromDate(DateTime(_startDate.year, _startDate.month, _startDate.day)))
+        .where('orderDate', isLessThanOrEqualTo: Timestamp.fromDate(DateTime(_endDate.year, _endDate.month, _endDate.day, 23, 59, 59)));
+
+    if (_selectedRepCode != null) {
+      query = query.where('buyer.repCode', isEqualTo: _selectedRepCode);
+    } else {
+      query = query.where('buyer.repCode', whereIn: _baseRepCodes);
+    }
+
+    if (_statusFilter != 'الكل') {
+      query = query.where('status', isEqualTo: _statusFilter);
+    }
+
+    query = query.orderBy('orderDate', descending: true).limit(60);
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: query.snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+        var orders = snapshot.data?.docs ?? [];
+        if (orders.isEmpty) return _emptyState("لم يتم العثور على طلبات مطابقة");
+
+        return ListView.builder(
+          padding: EdgeInsets.symmetric(horizontal: 5.w),
+          itemCount: orders.length,
+          itemBuilder: (context, index) {
+            var data = orders[index].data() as Map<String, dynamic>;
+            return _orderCard(data);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _orderCard(Map<String, dynamic> order) {
+    var buyer = order['buyer'] as Map<String, dynamic>?;
+    String sellerName = order['sellerName'] ?? "مورد غير محدد";
+    String status = order['status'] ?? 'قيد التنفيذ';
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 2.h),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 5))],
+      ),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 1.h),
+        leading: Container(
+          padding: EdgeInsets.all(2.w),
+          decoration: BoxDecoration(color: statusColors[status]!.withOpacity(0.1), shape: BoxShape.circle),
+          child: Icon(Icons.shopping_cart_checkout_rounded, color: statusColors[status], size: 22.sp),
+        ),
+        title: Row(
+          children: [
+            Expanded(child: Text(buyer?['name'] ?? 'عميل مجهول', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16.sp, color: kSidebarColor))),
+            _badge(sellerName, Colors.blueGrey),
+          ],
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(height: 1.h),
+            Row(
+              children: [
+                Icon(Icons.badge_outlined, size: 12.sp, color: kPrimaryColor),
+                SizedBox(width: 1.w),
+                Text("المندوب: ${buyer?['repName'] ?? buyer?['repCode']}", style: TextStyle(fontSize: 13.sp, color: Colors.blueGrey, fontWeight: FontWeight.w600)),
+              ],
+            ),
+            SizedBox(height: 0.5.h),
+            Text("${order['total']} ج.م", style: TextStyle(color: kPrimaryColor, fontWeight: FontWeight.w900, fontSize: 16.sp)),
+          ],
+        ),
+        children: [
+          Container(
+            padding: EdgeInsets.all(5.w),
+            decoration: BoxDecoration(color: const Color(0xFFF8F9FD), borderRadius: const BorderRadius.vertical(bottom: Radius.circular(20))),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _detailRow(Icons.warehouse_rounded, "المورد الأصلي", sellerName),
+                _detailRow(Icons.calendar_today_rounded, "تاريخ العملية", _formatDate(order['orderDate'])),
+                const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider()),
+                Text("قائمة الأصناف المباعة:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp, color: kSidebarColor)),
+                SizedBox(height: 1.5.h),
+                ...(order['items'] as List? ?? []).map((item) => Padding(
+                  padding: EdgeInsets.symmetric(vertical: 0.5.h),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          _badge("${item['quantity']}x", kPrimaryColor),
+                          SizedBox(width: 3.w),
+                          Text(item['name'] ?? 'منتج', style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w500)),
+                        ],
+                      ),
+                      Text("${(item['price'] * item['quantity']).toStringAsFixed(2)} ج.م", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.sp)),
+                    ],
+                  ),
+                )),
+              ],
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _badge(String text, Color color) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 2.5.w, vertical: 0.4.h),
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withOpacity(0.2))),
+      child: Text(text, style: TextStyle(color: color, fontSize: 9.sp, fontWeight: FontWeight.bold)),
+    );
+  }
+
+  Widget _detailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 0.5.h),
+      child: Row(
+        children: [
+          Icon(icon, size: 14.sp, color: Colors.blueGrey),
+          SizedBox(width: 3.w),
+          Text("$label: ", style: TextStyle(color: Colors.grey, fontSize: 13.sp)),
+          Expanded(child: Text(value, style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.bold, color: kSidebarColor))),
+        ],
+      ),
+    );
+  }
+
+  Widget _datePickerBtn(String label, DateTime date, Function(DateTime?) onSelect) {
     return Expanded(
       child: InkWell(
         onTap: () async {
-          final picked = await showDatePicker(
-            context: context,
-            initialDate: date,
-            firstDate: DateTime(2025),
-            lastDate: DateTime.now(),
-          );
+          final picked = await showDatePicker(context: context, initialDate: date, firstDate: DateTime(2025), lastDate: DateTime.now());
           if (picked != null) onSelect(picked);
         },
         child: Container(
-          padding: EdgeInsets.symmetric(vertical: 6.sp, horizontal: 8.sp),
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey[200]!),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
+          padding: EdgeInsets.all(3.w),
+          decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(12)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: TextStyle(fontSize: 9.sp, color: Colors.grey)),
-              SizedBox(width: 4.sp),
-              Text(DateFormat('yyyy-MM-dd').format(date),
-                  style: TextStyle(fontSize: 9.sp, fontWeight: FontWeight.bold)),
+              Text(label, style: TextStyle(fontSize: 10.sp, color: Colors.grey)),
+              Text(DateFormat('yyyy-MM-dd').format(date), style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
             ],
           ),
         ),
@@ -197,155 +338,42 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   void _showRepSelector() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) => Column(
-        children: [
-          Padding(
-            padding: EdgeInsets.all(12.sp),
-            child: Text("اختر المندوب", style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold)),
-          ),
-          const Divider(),
-          Expanded(
-            child: ListView.builder(
-              itemCount: _allReps.length + 1,
-              itemBuilder: (context, i) {
-                if (i == 0) {
-                  return ListTile(
-                    title: const Text("كل المناديب"),
-                    leading: const Icon(Icons.group),
-                    onTap: () {
-                      setState(() => _selectedRepCode = null);
-                      Navigator.pop(context);
-                    },
-                  );
-                }
-                var rep = _allReps[i - 1];
-                return ListTile(
-                  title: Text(rep['repName']),
-                  leading: const Icon(Icons.person_outline),
-                  trailing: _selectedRepCode == rep['repCode'] ? const Icon(Icons.check, color: Colors.green) : null,
-                  onTap: () {
-                    setState(() => _selectedRepCode = rep['repCode']);
-                    Navigator.pop(context);
-                  },
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOrdersStream() {
-    Query query = FirebaseFirestore.instance.collection('orders');
-
-    // تطبيق فلاتر التاريخ (هنا نحتاج حقل orderDate كـ Timestamp)
-    query = query
-        .where('orderDate', isGreaterThanOrEqualTo: Timestamp.fromDate(DateTime(_startDate.year, _startDate.month, _startDate.day)))
-        .where('orderDate', isLessThanOrEqualTo: Timestamp.fromDate(DateTime(_endDate.year, _endDate.month, _endDate.day, 23, 59, 59)));
-
-    // تطبيق فلاتر المندوب
-    if (_selectedRepCode != null) {
-      query = query.where('buyer.repCode', isEqualTo: _selectedRepCode);
-    } else if (_baseRepCodes.isNotEmpty) {
-      query = query.where('buyer.repCode', whereIn: _baseRepCodes);
-    }
-
-    query = query.orderBy('orderDate', descending: true);
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: query.snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(child: Text("خطأ: يرجى التأكد من وجود Index في Firestore"));
-        }
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        var orders = snapshot.data?.docs ?? [];
-        if (orders.isEmpty) return _emptyState("لا توجد طلبات لهذه الفترة");
-
-        return ListView.builder(
-          padding: EdgeInsets.all(10.sp),
-          itemCount: orders.length,
-          itemBuilder: (context, index) {
-            var data = orders[index].data() as Map<String, dynamic>;
-            return _orderCard(data, orders[index].id);
-          },
-        );
-      },
-    );
-  }
-
-  Widget _orderCard(Map<String, dynamic> order, String id) {
-    var buyer = order['buyer'] as Map<String, dynamic>?;
-    return Card(
-      elevation: 1.5,
-      margin: EdgeInsets.only(bottom: 10.sp),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ExpansionTile(
-        leading: CircleAvatar(
-            backgroundColor: const Color(0xFFF1F2F6),
-            child: Icon(Icons.receipt_long, color: const Color(0xFF1ABC9C), size: 16.sp)),
-        title: Text(buyer?['name'] ?? 'عميل مجهول', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.sp)),
-        subtitle: Text("المبلغ: ${order['total']} ج.م",
-            style: TextStyle(color: Colors.blue[800], fontWeight: FontWeight.bold, fontSize: 10.sp)),
-        children: [
-          Padding(
-            padding: EdgeInsets.all(10.sp),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _infoRow(Icons.calendar_month, "توقيت الطلب", _formatDate(order['orderDate'])),
-                _infoRow(Icons.person, "كود المندوب", buyer?['repCode'] ?? '-'),
-                const Divider(),
-                ...((order['items'] as List? ?? []).map((item) => ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(item['name'] ?? 'منتج', style: TextStyle(fontSize: 10.sp)),
-                      trailing: Text("سعر: ${item['price']} x ${item['quantity']}",
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 9.sp)),
-                    ))),
-              ],
-            ),
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _infoRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(children: [
-        Icon(icon, size: 12.sp, color: Colors.grey),
-        SizedBox(width: 8.sp),
-        Text("$label: ", style: TextStyle(color: Colors.grey, fontSize: 10.sp)),
-        Expanded(child: Text(value, style: TextStyle(fontSize: 10.sp, fontWeight: FontWeight.w600))),
-      ]),
-    );
-  }
-
-  Widget _emptyState(String msg) {
-    return Center(
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
+      builder: (context) => Padding(
+        padding: EdgeInsets.all(5.w),
         child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(Icons.event_busy, size: 40.sp, color: Colors.grey[300]),
-        SizedBox(height: 10.sp),
-        Text(msg, style: TextStyle(color: Colors.grey, fontSize: 12.sp)),
-      ],
-    ));
+          children: [
+            Container(width: 10.w, height: 5, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+            SizedBox(height: 2.h),
+            Text("اختر المندوب لتحليل بياناته", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold)),
+            const Divider(),
+            Expanded(
+              child: ListView.builder(
+                itemCount: _allReps.length + 1,
+                itemBuilder: (context, i) {
+                  if (i == 0) return ListTile(
+                    leading: const Icon(Icons.groups_rounded),
+                    title: Text("تحليل أداء كل المناديب", style: TextStyle(fontSize: 15.sp)), 
+                    onTap: () { setState(() => _selectedRepCode = null); Navigator.pop(context); }
+                  );
+                  var rep = _allReps[i - 1];
+                  return ListTile(
+                    leading: const Icon(Icons.person_outline),
+                    title: Text(rep['repName'], style: TextStyle(fontSize: 15.sp)), 
+                    onTap: () { setState(() => _selectedRepCode = rep['repCode']); Navigator.pop(context); }
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
-  String _formatDate(dynamic ts) {
-    if (ts == null) return "-";
-    if (ts is Timestamp) {
-      return DateFormat('yyyy-MM-dd HH:mm').format(ts.toDate());
-    }
-    return ts.toString();
-  }
+  Widget _emptyState(String msg) => Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.search_off_rounded, size: 50.sp, color: Colors.grey.shade300), SizedBox(height: 2.h), Text(msg, style: TextStyle(color: Colors.grey, fontSize: 14.sp), textAlign: TextAlign.center)]));
+
+  String _formatDate(dynamic ts) => ts is Timestamp ? DateFormat('yyyy-MM-dd HH:mm').format(ts.toDate()) : ts.toString();
 }
 
