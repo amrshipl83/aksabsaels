@@ -4,8 +4,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
-// استيراد الصفحة الجديدة
+
+// استيراد الصفحات التابعة
 import 'sales_orders_report_screen.dart';
+import 'customers_report_screen.dart';
 
 class SalesManagementDashboard extends StatefulWidget {
   const SalesManagementDashboard({super.key});
@@ -51,36 +53,57 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     }
   }
 
+  // ✅ الدالة المصححة منطقياً لجلب الإحصائيات
   Future<void> _loadStats() async {
     String role = _userData?['role'] ?? '';
-    String managerDocId = _userData?['docId'] ?? '';
-    if (managerDocId.isEmpty) return;
+    String myDocId = _userData?['docId'] ?? '';
+    if (myDocId.isEmpty) return;
 
     try {
-      Query agentsQuery = FirebaseFirestore.instance.collection('salesRep');
+      List<String> repCodes = [];
 
       if (role == 'sales_supervisor') {
-        agentsQuery = agentsQuery.where('supervisorId', isEqualTo: managerDocId);
-      } else if (role == 'sales_manager') {
-        agentsQuery = agentsQuery.where('ownerId', isEqualTo: managerDocId);
+        // المشرف: جلب مناديبه مباشرة
+        final agentsSnap = await FirebaseFirestore.instance
+            .collection('salesRep')
+            .where('supervisorId', isEqualTo: myDocId)
+            .get();
+        repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
+        totalAgents = agentsSnap.size;
+      } 
+      else if (role == 'sales_manager') {
+        // المدير: جلب المشرفين أولاً ثم مناديبهم
+        final supervisorsSnap = await FirebaseFirestore.instance
+            .collection('managers')
+            .where('managerId', isEqualTo: myDocId)
+            .get();
+        
+        List<String> supervisorIds = supervisorsSnap.docs.map((d) => d.id).toList();
+
+        if (supervisorIds.isNotEmpty) {
+          final agentsSnap = await FirebaseFirestore.instance
+              .collection('salesRep')
+              .where('supervisorId', whereIn: supervisorIds)
+              .get();
+          
+          repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
+          totalAgents = agentsSnap.size;
+        }
       }
 
-      final agentsSnap = await agentsQuery.get();
-      totalAgents = agentsSnap.size;
+      // حساب إحصائيات الطلبات بناءً على الأكواد المجمعة
+      if (repCodes.isNotEmpty) {
+        final ordersSnap = await FirebaseFirestore.instance
+            .collection('orders')
+            .where('buyer.repCode', whereIn: repCodes)
+            .get();
 
-      if (agentsSnap.docs.isNotEmpty) {
-        List<String> repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
-
-        Query ordersQuery = FirebaseFirestore.instance.collection('orders')
-            .where('buyer.repCode', whereIn: repCodes);
-
-        final ordersSnap = await ordersQuery.get();
         double salesSum = 0;
         double ratingSum = 0;
         int ratedCount = 0;
 
         for (var doc in ordersSnap.docs) {
-          var d = doc.data() as Map<String, dynamic>;
+          var d = doc.data();
           salesSum += (d['total'] ?? 0).toDouble();
           if (d['rating'] != null) {
             ratingSum += (d['rating'] as num).toDouble();
@@ -97,11 +120,12 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
         setState(() {
           totalOrders = 0;
           totalSales = 0;
+          totalAgents = 0;
           avgRating = 0;
         });
       }
     } catch (e) {
-      debugPrint("Firestore Error: $e");
+      debugPrint("Firestore Stats Error: $e");
     }
   }
 
@@ -114,7 +138,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     }
 
     String role = _userData?['role'] ?? '';
-    String staffManagementTitle = (role == 'sales_manager') ? "المندوبين والمشرفين" : "المندوبين";
+    String staffTitle = (role == 'sales_manager') ? "المشرفين والمناديب" : "المناديب";
 
     return Scaffold(
       backgroundColor: kBgColor,
@@ -125,12 +149,12 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
         elevation: 0.5,
         leading: Builder(builder: (context) {
           return IconButton(
-            icon: Icon(Icons.menu, size: 25.sp),
+            icon: Icon(Icons.menu, size: 22.sp),
             onPressed: () => Scaffold.of(context).openDrawer(),
           );
         }),
       ),
-      drawer: _buildDrawer(staffManagementTitle),
+      drawer: _buildDrawer(staffTitle),
       body: SingleChildScrollView(
         padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 2.h),
         child: Column(
@@ -155,8 +179,11 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             _buildQuickAction(Icons.sensors, "تتبع المندوبين لايف", () {
               Navigator.pushNamed(context, '/live_monitoring');
             }),
-            _buildQuickAction(Icons.manage_accounts, staffManagementTitle, () {
+            _buildQuickAction(Icons.manage_accounts, staffTitle, () {
               Navigator.pushNamed(context, '/manage_users');
+            }),
+            _buildQuickAction(Icons.people, "تقرير العملاء والمسحوبات", () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const CustomersReportScreen()));
             }),
           ],
         ),
@@ -176,7 +203,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text("مرحباً بك،", style: TextStyle(color: Colors.white70, fontSize: 13.sp)),
-              Text("${_userData?['fullname'] ?? 'مستخدم'}", style: TextStyle(color: Colors.white, fontSize: 17.sp, fontWeight: FontWeight.bold)),
+              Text("${_userData?['fullname'] ?? 'مستخدم'}", style: TextStyle(color: Colors.white, fontSize: 16.sp, fontWeight: FontWeight.bold)),
             ],
           ),
         ],
@@ -194,10 +221,10 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 28.sp),
+          Icon(icon, color: color, size: 25.sp),
           SizedBox(height: 1.h),
-          Text(title, style: TextStyle(fontSize: 12.sp, color: Colors.black54)),
-          Text(value, style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
+          Text(title, style: TextStyle(fontSize: 11.sp, color: Colors.black54)),
+          Text(value, style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
         ],
       ),
     );
@@ -205,13 +232,13 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
   Widget _buildQuickAction(IconData icon, String title, VoidCallback onTap) {
     return Card(
-      elevation: 2,
+      elevation: 1,
       margin: EdgeInsets.only(bottom: 2.h),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
-        leading: Icon(icon, color: kPrimaryColor, size: 22.sp),
-        title: Text(title, style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
-        // تم حذف const هنا لحل مشكلة البناء 🛑
-        trailing: Icon(Icons.arrow_forward_ios, size: 14.sp),
+        leading: Icon(icon, color: kPrimaryColor, size: 20.sp),
+        title: Text(title, style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold)),
+        trailing: Icon(Icons.arrow_forward_ios, size: 12.sp),
         onTap: onTap,
       ),
     );
@@ -224,7 +251,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
         child: Column(
           children: [
             SizedBox(height: 8.h),
-            Text("أكسب - إدارة المبيعات", style: TextStyle(color: kPrimaryColor, fontSize: 18.sp, fontWeight: FontWeight.bold)),
+            Text("أكسب - إدارة المبيعات", style: TextStyle(color: kPrimaryColor, fontSize: 16.sp, fontWeight: FontWeight.bold)),
             const Divider(color: Colors.white24),
             Expanded(
               child: ListView(
@@ -232,24 +259,16 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
                   _drawerItem(Icons.dashboard, "الرئيسية", true, onTap: () => Navigator.pop(context)),
                   _drawerItem(Icons.receipt_long, "تقارير الطلبات", false, onTap: () {
                     Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const SalesOrdersReportScreen()),
-                    );
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => const SalesOrdersReportScreen()));
                   }),
-                  _drawerItem(Icons.people, "العملاء", false),
+                  _drawerItem(Icons.people, "العملاء", false, onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => const CustomersReportScreen()));
+                  }),
                   _drawerItem(Icons.manage_accounts, staffTitle, false, onTap: () {
                     Navigator.pop(context);
                     Navigator.pushNamed(context, '/manage_users');
                   }),
-                  _drawerItem(Icons.pie_chart, "التقارير الشاملة", false),
-                  _drawerItem(Icons.percent, "عروض الشهر", false),
-                  _drawerItem(Icons.location_on, "تقارير الزيارات", false),
-                  _drawerItem(Icons.sensors, "لايف - المتابعة اللحظية", false, onTap: () {
-                    Navigator.pop(context);
-                    Navigator.pushNamed(context, '/live_monitoring');
-                  }),
-                  const Divider(color: Colors.white10),
                   _drawerItem(Icons.logout, "تسجيل الخروج", false, color: Colors.redAccent, onTap: () async {
                     await FirebaseAuth.instance.signOut();
                     (await SharedPreferences.getInstance()).clear();
@@ -267,8 +286,8 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   Widget _drawerItem(IconData icon, String title, bool active, {Color? color, VoidCallback? onTap}) {
     return ListTile(
       onTap: onTap,
-      leading: Icon(icon, color: color ?? (active ? kPrimaryColor : Colors.white70), size: 22.sp),
-      title: Text(title, style: TextStyle(color: color ?? Colors.white, fontSize: 15.sp)),
+      leading: Icon(icon, color: color ?? (active ? kPrimaryColor : Colors.white70), size: 20.sp),
+      title: Text(title, style: TextStyle(color: color ?? Colors.white, fontSize: 14.sp)),
     );
   }
 }

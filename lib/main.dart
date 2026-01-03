@@ -3,18 +3,21 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:sizer/sizer.dart';
 import 'firebase_options.dart';
 
-// استيراد الشاشات
+// --- استيراد الشاشات ---
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/rep/sales_rep_home_screen.dart';
 import 'screens/rep/visit_screen.dart';
 import 'screens/rep/add_new_customer.dart';
+
+// --- شاشات الإدارة (Admin) ---
 import 'screens/admin/sales_management_dashboard.dart';
 import 'screens/admin/live_monitoring_screen.dart';
 import 'screens/admin/manage_users_screen.dart';
 import 'screens/admin/sales_orders_report_screen.dart';
-// 🛑 استيراد صفحة الأداء الجديدة لتجنب أخطاء التوجيه
-import 'screens/admin/performance_dashboard_screen.dart'; 
+import 'screens/admin/performance_dashboard_screen.dart';
+// ✅ إضافة استيراد شاشة العملاء الجديدة
+import 'screens/admin/customers_report_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,6 +37,7 @@ class AksabSalesApp extends StatelessWidget {
         return MaterialApp(
           title: 'Aksab Sales App',
           debugShowCheckedModeBanner: false,
+          // ✅ الحفاظ على اتجاه النص العام للتطبيق (RTL) هنا فقط
           builder: (context, child) {
             return Directionality(
               textDirection: TextDirection.rtl,
@@ -42,7 +46,7 @@ class AksabSalesApp extends StatelessWidget {
           },
           theme: ThemeData(
             primarySwatch: Colors.green,
-            fontFamily: 'Cairo', // تأكد من إضافة الخط في pubspec.yaml
+            fontFamily: 'Cairo', // تأكد من وجوده في pubspec.yaml
             useMaterial3: true,
             colorScheme: ColorScheme.fromSeed(
               seedColor: const Color(0xFF43B97F),
@@ -56,15 +60,18 @@ class AksabSalesApp extends StatelessWidget {
             '/rep_home': (context) => const SalesRepHomeScreen(),
             '/visits': (context) => const VisitScreen(),
             '/add_customer': (context) => const AddNewCustomerScreen(),
-            
+
             // --- مسارات الإدارة (Admin Routes) ---
             '/admin_dashboard': (context) => const SalesManagementDashboard(),
             '/live_monitoring': (context) => const LiveMonitoringScreen(),
             '/manage_users': (context) => const ManageUsersScreen(),
             '/sales_report': (context) => const SalesOrdersReportScreen(),
             
-            // 🛑 ملاحظة: صفحة الأداء يتم استدعاؤها عبر Navigator.push 
-            // ولكن يمكن تسجيل مسار لها هنا إذا أردت استدعاءها بـ Named Route لاحقاً
+            // ✅ تسجيل مسار شاشة العملاء الجديدة لسهولة الاستدعاء
+            '/customers_report': (context) => const CustomersReportScreen(),
+            
+            // صفحة الأداء
+            '/performance_dashboard': (context) => const PerformanceDashboardScreen(),
           },
         );
       },
