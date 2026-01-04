@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import 'package:fl_chart/fl_chart.dart'; // تأكد من إضافة fl_chart في pubspec.yaml
+import 'package:fl_chart/fl_chart.dart';
+// حزم الـ PDF والطباعة
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
-// --- الثوابت اللونية ---
 const Color kPrimaryColor = Color(0xFF43B97F);
 const Color kSecondaryColor = Color(0xFF1A2C3D);
 const Color kBgColor = Color(0xFFf0f2f5);
@@ -19,10 +22,12 @@ class RepReportsScreen extends StatefulWidget {
 class _RepReportsScreenState extends State<RepReportsScreen> {
   Map<String, dynamic>? repData;
   bool _isLoading = true;
-  List<Map<String, dynamic>> allOrders = [];
   double totalSales = 0.0;
   Map<String, double> salesByStatus = {};
   Map<String, int> ordersCountByStatus = {};
+  
+  // الفلتر المختار
+  String _selectedFilter = 'month'; // 'day', 'month', 'all'
 
   @override
   void initState() {
@@ -42,17 +47,27 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   Future<void> _fetchOrders() async {
     setState(() => _isLoading = true);
     try {
-      final snapshot = await FirebaseFirestore.instance
+      Query query = FirebaseFirestore.instance
           .collection('orders')
-          .where('buyer.repCode', isEqualTo: repData!['repCode'])
-          .get();
+          .where('buyer.repCode', isEqualTo: repData!['repCode']);
+
+      DateTime now = DateTime.now();
+      if (_selectedFilter == 'day') {
+        DateTime startOfDay = DateTime(now.year, now.month, now.day);
+        query = query.where('createdAt', isGreaterThanOrEqualTo: startOfDay);
+      } else if (_selectedFilter == 'month') {
+        DateTime startOfMonth = DateTime(now.year, now.month, 1);
+        query = query.where('createdAt', isGreaterThanOrEqualTo: startOfMonth);
+      }
+
+      final snapshot = await query.get();
 
       double tempTotal = 0;
       Map<String, double> tempStatusSales = {};
       Map<String, int> tempStatusCount = {};
 
       for (var doc in snapshot.docs) {
-        var data = doc.data();
+        var data = doc.data() as Map<String, dynamic>;
         double orderTotal = (data['total'] ?? 0).toDouble();
         String status = data['status'] ?? 'جديد';
 
@@ -73,6 +88,68 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
     }
   }
 
+  // --- 📄 دالة إنشاء ملف PDF احترافي ---
+  Future<void> _generatePdf() async {
+    final pdf = pw.Document();
+    final font = await PdfGoogleFonts.almaraiRegular();
+    final boldFont = await PdfGoogleFonts.almaraiBold();
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        textDirection: pw.TextDirection.rtl,
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('اكسب - تقرير أداء المندوب', style: pw.TextStyle(font: boldFont, fontSize: 18, color: PdfColors.green)),
+                  pw.Text(DateTime.now().toString().substring(0, 10), style: pw.TextStyle(font: font, fontSize: 12)),
+                ],
+              ),
+              pw.Divider(thickness: 2, color: PdfColors.grey300),
+              pw.SizedBox(height: 20),
+              pw.Text('اسم المندوب: ${repData?['fullname']}', style: pw.TextStyle(font: font, fontSize: 14)),
+              pw.Text('كود المندوب: ${repData?['repCode']}', style: pw.TextStyle(font: font, fontSize: 14)),
+              pw.SizedBox(height: 20),
+              pw.Container(
+                padding: const pw.EdgeInsets.all(10),
+                decoration: const pw.BoxDecoration(color: PdfColors.green50),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('إجمالي المبيعات المحققة:', style: pw.TextStyle(font: boldFont, fontSize: 16)),
+                    pw.Text('${totalSales.toStringAsFixed(2)} ج.م', style: pw.TextStyle(font: boldFont, fontSize: 16, color: PdfColors.green)),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 30),
+              pw.Text('تفصيل المبيعات حسب الحالة:', style: pw.TextStyle(font: boldFont, fontSize: 14)),
+              pw.SizedBox(height: 10),
+              pw.TableHelper.fromTextArray(
+                font: font,
+                headerStyle: pw.TextStyle(font: boldFont, color: PdfColors.white),
+                headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
+                cellAlignment: pw.Alignment.centerRight,
+                data: <List<String>>[
+                  ['الحالة', 'عدد الطلبات', 'القيمة الإجمالية'],
+                  ...salesByStatus.entries.map((e) => [
+                    e.key,
+                    ordersCountByStatus[e.key].toString(),
+                    '${e.value.toStringAsFixed(2)} ج.م'
+                  ]),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    await Printing.layoutPdf(onLayout: (format) async => pdf.save());
+  }
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -85,21 +162,70 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
           foregroundColor: kSecondaryColor,
           elevation: 0.5,
           centerTitle: true,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
+              onPressed: totalSales > 0 ? _generatePdf : null,
+            )
+          ],
         ),
-        body: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: kPrimaryColor))
-            : SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    _buildTotalCard(),
-                    const SizedBox(height: 20),
-                    _buildStatusChartSection(),
-                    const SizedBox(height: 20),
-                    _buildStatusTable(),
-                  ],
-                ),
-              ),
+        body: Column(
+          children: [
+            _buildFilterTabs(),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator(color: kPrimaryColor))
+                  : SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          _buildTotalCard(),
+                          const SizedBox(height: 20),
+                          if (salesByStatus.isNotEmpty) ...[
+                            _buildStatusChartSection(),
+                            const SizedBox(height: 20),
+                            _buildStatusTable(),
+                          ] else
+                            _buildNoDataState(),
+                        ],
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterTabs() {
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _filterButton('اليوم', 'day'),
+          _filterButton('الشهر', 'month'),
+          _filterButton('الكل', 'all'),
+        ],
+      ),
+    );
+  }
+
+  Widget _filterButton(String title, String value) {
+    bool isSelected = _selectedFilter == value;
+    return GestureDetector(
+      onTap: () {
+        setState(() => _selectedFilter = value);
+        _fetchOrders();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? kPrimaryColor : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(title, style: TextStyle(color: isSelected ? Colors.white : Colors.grey, fontWeight: FontWeight.bold)),
       ),
     );
   }
@@ -107,9 +233,9 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   Widget _buildTotalCard() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(25),
       decoration: BoxDecoration(
-        color: kPrimaryColor,
+        gradient: const LinearGradient(colors: [kPrimaryColor, Color(0xFF34A36D)]),
         borderRadius: BorderRadius.circular(15),
         boxShadow: [BoxShadow(color: kPrimaryColor.withOpacity(0.3), blurRadius: 10)],
       ),
@@ -119,7 +245,7 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
           const SizedBox(height: 10),
           Text(
             '${totalSales.toStringAsFixed(2)} ج.م',
-            style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+            style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -128,22 +254,23 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
 
   Widget _buildStatusChartSection() {
     return Container(
-      padding: const EdgeInsets.all(15),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
       child: Column(
         children: [
-          const Text('توزيع المبيعات حسب الحالة', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const Text('توزيع الحالات', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 20),
           SizedBox(
-            height: 200,
+            height: 180,
             child: PieChart(
               PieChartData(
                 sections: salesByStatus.entries.map((entry) {
                   return PieChartSectionData(
                     value: entry.value,
-                    title: '',
+                    title: '${((entry.value / totalSales) * 100).toStringAsFixed(0)}%',
+                    titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                     color: _getStatusColor(entry.key),
-                    radius: 50,
+                    radius: 55,
                   );
                 }).toList(),
               ),
@@ -156,10 +283,12 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
 
   Widget _buildStatusTable() {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
       child: DataTable(
-        columnSpacing: 20,
+        columnSpacing: 15,
+        horizontalMargin: 10,
         columns: const [
           DataColumn(label: Text('الحالة')),
           DataColumn(label: Text('الطلبات')),
@@ -167,11 +296,24 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
         ],
         rows: salesByStatus.entries.map((entry) {
           return DataRow(cells: [
-            DataCell(Text(entry.key)),
+            DataCell(Text(entry.key, style: const TextStyle(fontSize: 12))),
             DataCell(Text(ordersCountByStatus[entry.key].toString())),
-            DataCell(Text('${entry.value.toStringAsFixed(0)} ج.م')),
+            DataCell(Text('${entry.value.toStringAsFixed(0)} ج.م', style: const TextStyle(fontWeight: FontWeight.bold))),
           ]);
         }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildNoDataState() {
+    return const Padding(
+      padding: EdgeInsets.only(top: 50),
+      child: Column(
+        children: [
+          Icon(Icons.insert_chart_outlined, size: 80, color: Colors.grey),
+          SizedBox(height: 10),
+          Text("لا توجد مبيعات مسجلة لهذه الفترة", style: TextStyle(color: Colors.grey)),
+        ],
       ),
     );
   }
