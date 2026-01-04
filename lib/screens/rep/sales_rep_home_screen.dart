@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'sales_rep_dashboard.dart';
 import 'visit_screen.dart';
 import 'goals_screen.dart'; // استيراد شاشة الأهداف
+import 'my_customers_screen.dart'; // ✅ استيراد شاشة عملائي الجديدة
 import '../admin/offers_screen.dart'; // ✅ استيراد شاشة العروض المدمجة
 
 // --- الثوابت اللونية ---
@@ -29,7 +30,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
   bool _isLoading = true;
   String _statusMessage = 'جاري التحقق...';
   bool _isDayOpen = false;
-
   final db = FirebaseFirestore.instance;
 
   @override
@@ -189,7 +189,15 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                           Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
                         }
                     ),
-                    _drawerItem(Icons.people_outline, "عملائي", false),
+                    _drawerItem(
+                      Icons.people_outline, 
+                      "عملائي", 
+                      false,
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen()));
+                      }
+                    ),
                     _drawerItem(Icons.receipt_outlined, "طلباتي", false),
                     _drawerItem(
                         Icons.location_on_outlined,
@@ -206,7 +214,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                           }
                         }
                     ),
-                    // ✅ تم استبدال خيار "عروض" القديم بمركز العروض والجوائز المدمج
                     _drawerItem(
                         Icons.local_offer_outlined,
                         "مركز العروض والجوائز",
