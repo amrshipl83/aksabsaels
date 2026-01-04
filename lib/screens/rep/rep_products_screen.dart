@@ -20,7 +20,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
   Map<String, List<Map<String, double>>> _areaCoordinates = {};
   bool _isLoadingLocation = true;
 
-  // --- 🛒 متغيرات سلة المحاكاة ---
+  // --- 🛒 سلة المحاكاة ---
   final Map<String, Map<String, dynamic>> _demoCart = {};
 
   @override
@@ -64,7 +64,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
         }).toList();
       }
     } catch (e) {
-      print("Error loading GeoJSON: $e");
+      debugPrint("Error loading GeoJSON: $e");
     }
   }
 
@@ -86,13 +86,19 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
     return total;
   }
 
+  int _calculateTotalQty() {
+    int count = 0;
+    _demoCart.forEach((key, value) => count += (value['qty'] as int));
+    return count;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(widget.subName),
+          title: Text(widget.subName, style: const TextStyle(fontWeight: FontWeight.bold)),
           backgroundColor: Colors.white,
           foregroundColor: Colors.black,
           elevation: 0.5,
@@ -104,35 +110,49 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
               )
           ],
         ),
-        body: _isLoadingLocation
-            ? const Center(child: CircularProgressIndicator())
-            : Stack(
-                children: [
-                  StreamBuilder<QuerySnapshot>(
-                    stream: _db.collection('products')
-                        .where('subId', isEqualTo: widget.subId)
-                        .where('status', isEqualTo: 'active')
-                        .snapshots(),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                      return ListView.builder(
-                        padding: EdgeInsets.only(left: 10, right: 10, top: 10, bottom: _demoCart.isNotEmpty ? 100 : 10),
-                        itemCount: snapshot.data!.docs.length,
-                        itemBuilder: (context, index) {
-                          var product = snapshot.data!.docs[index];
-                          return _buildProductOffers(product.id, product['name'], product['imageUrls']?[0]);
-                        },
-                      );
-                    },
-                  ),
-                  // --- بار الإجمالي (المحاكاة) ---
-                  if (_demoCart.isNotEmpty)
-                    Positioned(
-                      bottom: 0, left: 0, right: 0,
-                      child: _buildBottomDemoBar(),
-                    ),
-                ],
-              ),
+        // ✅ إضافة السلة العائمة (Floating Action Button)
+        floatingActionButton: _demoCart.isNotEmpty ? FloatingActionButton.extended(
+          onPressed: () => _showDemoSuccess(),
+          backgroundColor: const Color(0xFF43B97F), // kPrimaryColor
+          icon: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              const Icon(Icons.shopping_cart, color: Colors.white),
+              Positioned(
+                right: -5, top: -5,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                  child: Text("${_calculateTotalQty()}", style: const TextStyle(fontSize: 10, color: Colors.white)),
+                ),
+              )
+            ],
+          ),
+          label: Text("إجمالي: ${_calculateTotal().toStringAsFixed(0)} ج.م", 
+                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        ) : null,
+        // ✅ استخدام SafeArea لحماية المحتوى من أزرار الهاتف
+        body: SafeArea(
+          child: _isLoadingLocation
+              ? const Center(child: CircularProgressIndicator())
+              : StreamBuilder<QuerySnapshot>(
+                  stream: _db.collection('products')
+                      .where('subId', isEqualTo: widget.subId)
+                      .where('status', isEqualTo: 'active')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                    return ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(10, 10, 10, 80), // مساحة إضافية للسلة العائمة
+                      itemCount: snapshot.data!.docs.length,
+                      itemBuilder: (context, index) {
+                        var product = snapshot.data!.docs[index];
+                        return _buildProductOffers(product.id, product['name'], product['imageUrls']?[0]);
+                      },
+                    );
+                  },
+                ),
+        ),
       ),
     );
   }
@@ -160,7 +180,6 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
 
         if (filteredOffers.isEmpty) return const SizedBox();
 
-        // ترتيب العروض من الأرخص
         filteredOffers.sort((a, b) {
           var pA = (a.data() as Map)['price'] ?? (a.data() as Map)['units']?[0]['price'] ?? 0;
           var pB = (b.data() as Map)['price'] ?? (b.data() as Map)['units']?[0]['price'] ?? 0;
@@ -169,12 +188,15 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
 
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
-          clipBehavior: Clip.antiAlias,
+          elevation: 2,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ExpansionTile(
-            leading: imageUrl != null
-                ? Image.network(imageUrl, width: 45, height: 45, fit: BoxFit.cover)
-                : const Icon(Icons.shopping_bag, color: Colors.grey),
+            leading: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: imageUrl != null
+                  ? Image.network(imageUrl, width: 45, height: 45, fit: BoxFit.cover)
+                  : const Icon(Icons.shopping_bag, color: Colors.grey),
+            ),
             title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             subtitle: Text("متاح لدى ${filteredOffers.length} تجار", style: const TextStyle(fontSize: 11)),
             children: filteredOffers.map((offerDoc) {
@@ -184,7 +206,10 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
               String offerId = offerDoc.id;
 
               return Container(
-                color: Colors.grey.shade50,
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: Colors.grey.shade200)),
+                  color: Colors.grey.shade50,
+                ),
                 child: ListTile(
                   title: Text(sellerName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
                   subtitle: Text("السعر: $price ج.م", style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
@@ -198,7 +223,10 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
                               'qty': 1
                             };
                           }),
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.symmetric(horizontal: 12)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF43B97F),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
                           child: const Text("إضافة", style: TextStyle(color: Colors.white, fontSize: 12)),
                         ),
                 ),
@@ -211,49 +239,26 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
   }
 
   Widget _buildQtyControl(String id) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 20),
-          onPressed: () => setState(() {
-            if (_demoCart[id]!['qty'] > 1) _demoCart[id]!['qty']--;
-            else _demoCart.remove(id);
-          }),
-        ),
-        Text("${_demoCart[id]!['qty']}", style: const TextStyle(fontWeight: FontWeight.bold)),
-        IconButton(
-          icon: const Icon(Icons.add_circle_outline, color: Colors.green, size: 20),
-          onPressed: () => setState(() => _demoCart[id]!['qty']++),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBottomDemoBar() {
     return Container(
-      padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: const Offset(0, -2))],
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey.shade300),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("إجمالي العرض للعميل", style: TextStyle(fontSize: 12, color: Colors.grey)),
-              Text("${_calculateTotal().toStringAsFixed(2)} ج.م", 
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blue)),
-            ],
+          IconButton(
+            icon: const Icon(Icons.remove, color: Colors.red, size: 18),
+            onPressed: () => setState(() {
+              if (_demoCart[id]!['qty'] > 1) _demoCart[id]!['qty']--;
+              else _demoCart.remove(id);
+            }),
           ),
-          ElevatedButton(
-            onPressed: () => _showDemoSuccess(),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-            child: const Text("شرح الطلب للعميل", style: TextStyle(color: Colors.white)),
+          Text("${_demoCart[id]!['qty']}", style: const TextStyle(fontWeight: FontWeight.bold)),
+          IconButton(
+            icon: const Icon(Icons.add, color: Colors.green, size: 18),
+            onPressed: () => setState(() => _demoCart[id]!['qty']++),
           ),
         ],
       ),
@@ -263,26 +268,57 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
   void _showDemoSuccess() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
       builder: (context) => Container(
         padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.info_outline, size: 50, color: Colors.blue),
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))),
+            const SizedBox(height: 20),
+            const Icon(Icons.check_circle_outline, size: 70, color: Color(0xFF43B97F)),
             const SizedBox(height: 10),
-            const Text("توجيه العميل", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 15),
-              child: Text(
-                "يا حاج، دي المنتجات اللي اخترناها سوا. دلوقتي تقدر تفتح تطبيقك وتطلبها بنفس السعر ده وهتوصلك فوراً!",
-                textAlign: TextAlign.center,
+            const Text("ملخص العرض للعميل", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Divider(),
+            ..._demoCart.values.map((item) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("${item['name']} (x${item['qty']})", style: const TextStyle(fontSize: 13)),
+                  Text("${(item['price'] * item['qty']).toStringAsFixed(0)} ج.م", style: const TextStyle(fontWeight: FontWeight.bold)),
+                ],
               ),
+            )),
+            const Divider(thickness: 2),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text("الإجمالي النهائي", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                Text("${_calculateTotal().toStringAsFixed(2)} ج.م", style: const TextStyle(fontSize: 18, color: Colors.green, fontWeight: FontWeight.bold)),
+              ],
             ),
+            const SizedBox(height: 20),
+            const Text(
+              "يا حاج، دي المنتجات اللي اخترناها سوا. دلوقتي تقدر تفتح تطبيقك وتطلبها بنفس السعر ده وهتوصلك فوراً!",
+              textAlign: TextAlign.center, style: TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text("تم")),
-            )
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF43B97F),
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text("فهمت، شكراً", style: TextStyle(color: Colors.white, fontSize: 16)),
+              ),
+            ),
+            const SizedBox(height: 10),
           ],
         ),
       ),

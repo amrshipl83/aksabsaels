@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:fl_chart/fl_chart.dart';
-// حزم الـ PDF والطباعة
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -26,8 +25,8 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   Map<String, double> salesByStatus = {};
   Map<String, int> ordersCountByStatus = {};
   
-  // الفلتر المختار
-  String _selectedFilter = 'month'; // 'day', 'month', 'all'
+  // الفلتر الافتراضي: الشهر الحالي
+  String _selectedFilter = 'month'; 
 
   @override
   void initState() {
@@ -47,33 +46,52 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   Future<void> _fetchOrders() async {
     setState(() => _isLoading = true);
     try {
-      Query query = FirebaseFirestore.instance
+      // جلب طلبات المندوب بناءً على كوده الخاص لضمان الخصوصية
+      final snapshot = await FirebaseFirestore.instance
           .collection('orders')
-          .where('buyer.repCode', isEqualTo: repData!['repCode']);
-
-      DateTime now = DateTime.now();
-      if (_selectedFilter == 'day') {
-        DateTime startOfDay = DateTime(now.year, now.month, now.day);
-        query = query.where('createdAt', isGreaterThanOrEqualTo: startOfDay);
-      } else if (_selectedFilter == 'month') {
-        DateTime startOfMonth = DateTime(now.year, now.month, 1);
-        query = query.where('createdAt', isGreaterThanOrEqualTo: startOfMonth);
-      }
-
-      final snapshot = await query.get();
+          .where('buyer.repCode', isEqualTo: repData!['repCode'])
+          .get();
 
       double tempTotal = 0;
       Map<String, double> tempStatusSales = {};
       Map<String, int> tempStatusCount = {};
+      
+      DateTime now = DateTime.now();
 
       for (var doc in snapshot.docs) {
-        var data = doc.data() as Map<String, dynamic>;
-        double orderTotal = (data['total'] ?? 0).toDouble();
-        String status = data['status'] ?? 'جديد';
+        var data = doc.data();
+        
+        // تحويل تاريخ Firestore (Timestamp) إلى DateTime
+        DateTime? orderDate;
+        if (data['createdAt'] != null && data['createdAt'] is Timestamp) {
+          orderDate = (data['createdAt'] as Timestamp).toDate();
+        }
 
-        tempTotal += orderTotal;
-        tempStatusSales[status] = (tempStatusSales[status] ?? 0) + orderTotal;
-        tempStatusCount[status] = (tempStatusCount[status] ?? 0) + 1;
+        // --- منطق الفلترة البرمجية المضمون ---
+        bool matchesFilter = true;
+        if (_selectedFilter != 'all') {
+          if (orderDate != null) {
+            if (_selectedFilter == 'day') {
+              matchesFilter = orderDate.year == now.year && 
+                              orderDate.month == now.month && 
+                              orderDate.day == now.day;
+            } else if (_selectedFilter == 'month') {
+              matchesFilter = orderDate.year == now.year && 
+                              orderDate.month == now.month;
+            }
+          } else {
+            matchesFilter = false; 
+          }
+        }
+
+        if (matchesFilter) {
+          double orderTotal = (data['total'] ?? 0).toDouble();
+          String status = data['status'] ?? 'جديد';
+
+          tempTotal += orderTotal;
+          tempStatusSales[status] = (tempStatusSales[status] ?? 0) + orderTotal;
+          tempStatusCount[status] = (tempStatusCount[status] ?? 0) + 1;
+        }
       }
 
       setState(() {
@@ -88,7 +106,7 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
     }
   }
 
-  // --- 📄 دالة إنشاء ملف PDF احترافي (تم التصحيح هنا) ---
+  // --- 📄 إنشاء ملف PDF بتنسيق متوافق مع أحدث نسخة ---
   Future<void> _generatePdf() async {
     final pdf = pw.Document();
     final font = await PdfGoogleFonts.almaraiRegular();
@@ -120,7 +138,7 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text('إجمالي المبيعات المحققة:', style: pw.TextStyle(font: boldFont, fontSize: 16)),
+                    pw.Text('إجمالي مبيعات الفترة:', style: pw.TextStyle(font: boldFont, fontSize: 16)),
                     pw.Text('${totalSales.toStringAsFixed(2)} ج.م', style: pw.TextStyle(font: boldFont, fontSize: 16, color: PdfColors.green)),
                   ],
                 ),
@@ -128,7 +146,6 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
               pw.SizedBox(height: 30),
               pw.Text('تفصيل المبيعات حسب الحالة:', style: pw.TextStyle(font: boldFont, fontSize: 14)),
               pw.SizedBox(height: 10),
-              // ✅ التصحيح: تم نقل الخط داخل cellStyle و headerStyle
               pw.TableHelper.fromTextArray(
                 cellStyle: pw.TextStyle(font: font),
                 headerStyle: pw.TextStyle(font: boldFont, color: PdfColors.white),
