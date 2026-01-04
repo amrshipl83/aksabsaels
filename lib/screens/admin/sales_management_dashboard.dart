@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // ✅ استيراد للإشعارات
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
 
@@ -9,7 +10,7 @@ import 'package:sizer/sizer.dart';
 import 'sales_orders_report_screen.dart';
 import 'customers_report_screen.dart';
 import 'offers_screen.dart';
-import 'profile_screen.dart'; // تأكد من إنشاء هذا الملف بكود الملف الشخصي الذي قدمته لك سابقاً
+import 'profile_screen.dart'; 
 
 class SalesManagementDashboard extends StatefulWidget {
   const SalesManagementDashboard({super.key});
@@ -31,12 +32,52 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   int totalOrders = 0;
   double totalSales = 0;
   int totalAgents = 0;
-  int secondaryStat = 0; // متغير للإحصائية المتغيرة (عدد المشرفين أو العملاء)
+  int secondaryStat = 0; 
 
   @override
   void initState() {
     super.initState();
     _initDashboard();
+    _setupNotifications(); // ✅ تفعيل طلب إذن الإشعارات للإدارة عند الدخول
+  }
+
+  // --- 🔔 تأمين طلب الإشعارات للمديرين والمشرفين ---
+  Future<void> _setupNotifications() async {
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+    NotificationSettings settings = await messaging.getNotificationSettings();
+
+    // إذا لم يكن الإذن "مسموحاً" بالفعل
+    if (settings.authorizationStatus != AuthorizationStatus.authorized) {
+      if (mounted) {
+        bool? startRequest = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: const Text('تفعيل تنبيهات الإدارة', textAlign: TextAlign.center),
+            content: const Text(
+              'يرجى تفعيل التنبيهات لتتمكن من استلام تقارير المبيعات اليومية، تنبيهات طلبات المناديب، والإحصائيات الهامة فور تحديثها.',
+              textAlign: TextAlign.center,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('لاحقاً', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(backgroundColor: kPrimaryColor),
+                child: const Text('موافق', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        );
+
+        if (startRequest == true) {
+          await messaging.requestPermission(alert: true, badge: true, sound: true);
+        }
+      }
+    }
   }
 
   Future<void> _initDashboard() async {
@@ -63,7 +104,6 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     try {
       List<String> repCodes = [];
       if (role == 'sales_supervisor') {
-        // للمشرف: نحسب عدد العملاء المرتبطين بمناديبه
         final agentsSnap = await FirebaseFirestore.instance
             .collection('salesRep')
             .where('supervisorId', isEqualTo: myDocId)
@@ -73,19 +113,18 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
         if (repCodes.isNotEmpty) {
            final customersSnap = await FirebaseFirestore.instance
-              .collection('deliverySupermarkets') // استخدام الثابت المتفق عليه [cite: 2025-10-03]
-              .where('ownerId', whereIn: repCodes)
-              .get();
+               .collection('deliverySupermarkets') 
+               .where('ownerId', whereIn: repCodes)
+               .get();
            secondaryStat = customersSnap.size;
         }
       } else if (role == 'sales_manager') {
-        // للمدير: نحسب عدد المشرفين التابعين له
         final supervisorsSnap = await FirebaseFirestore.instance
             .collection('managers')
             .where('managerId', isEqualTo: myDocId)
             .get();
-        secondaryStat = supervisorsSnap.size; // عدد المشرفين
-        
+        secondaryStat = supervisorsSnap.size; 
+
         List<String> supervisorIds = supervisorsSnap.docs.map((d) => d.id).toList();
         if (supervisorIds.isNotEmpty) {
           final agentsSnap = await FirebaseFirestore.instance
@@ -199,9 +238,9 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
       child: Row(
         children: [
           CircleAvatar(
-              radius: 7.w, 
-              backgroundColor: kPrimaryColor.withOpacity(0.1), 
-              child: Icon(Icons.person_2_rounded, color: kPrimaryColor, size: 10.w)
+            radius: 7.w,
+            backgroundColor: kPrimaryColor.withOpacity(0.1),
+            child: Icon(Icons.person_2_rounded, color: kPrimaryColor, size: 10.w)
           ),
           SizedBox(width: 4.w),
           Column(
