@@ -7,6 +7,7 @@ import 'sales_rep_dashboard.dart';
 import 'visit_screen.dart';
 import 'goals_screen.dart'; // استيراد شاشة الأهداف
 import 'my_customers_screen.dart'; // ✅ استيراد شاشة عملائي الجديدة
+import 'my_orders_screen.dart'; // ✅ استيراد شاشة طلباتي الجديدة
 import '../admin/offers_screen.dart'; // ✅ استيراد شاشة العروض المدمجة
 
 // --- الثوابت اللونية ---
@@ -198,7 +199,15 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                         Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen()));
                       }
                     ),
-                    _drawerItem(Icons.receipt_outlined, "طلباتي", false),
+                    _drawerItem(
+                      Icons.receipt_outlined, 
+                      "طلباتي", 
+                      false,
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => const MyOrdersScreen()));
+                      }
+                    ),
                     _drawerItem(
                         Icons.location_on_outlined,
                         "الزيارات",
