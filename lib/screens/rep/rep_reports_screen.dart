@@ -83,12 +83,12 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
         _isLoading = false;
       });
     } catch (e) {
-      print("Error fetching reports: $e");
+      debugPrint("Error fetching reports: $e");
       setState(() => _isLoading = false);
     }
   }
 
-  // --- 📄 دالة إنشاء ملف PDF احترافي ---
+  // --- 📄 دالة إنشاء ملف PDF احترافي (تم التصحيح هنا) ---
   Future<void> _generatePdf() async {
     final pdf = pw.Document();
     final font = await PdfGoogleFonts.almaraiRegular();
@@ -128,8 +128,9 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
               pw.SizedBox(height: 30),
               pw.Text('تفصيل المبيعات حسب الحالة:', style: pw.TextStyle(font: boldFont, fontSize: 14)),
               pw.SizedBox(height: 10),
+              // ✅ التصحيح: تم نقل الخط داخل cellStyle و headerStyle
               pw.TableHelper.fromTextArray(
-                font: font,
+                cellStyle: pw.TextStyle(font: font),
                 headerStyle: pw.TextStyle(font: boldFont, color: PdfColors.white),
                 headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
                 cellAlignment: pw.Alignment.centerRight,
