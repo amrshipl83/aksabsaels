@@ -2,15 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; // ✅ استيراد للإشعارات
+import 'package:firebase_messaging/firebase_messaging.dart'; 
 import 'dart:convert';
 import 'sales_rep_dashboard.dart';
 import 'visit_screen.dart';
-import 'goals_screen.dart'; // استيراد شاشة الأهداف
-import 'my_customers_screen.dart'; // ✅ استيراد شاشة عملائي الجديدة
-import 'my_orders_screen.dart'; // ✅ استيراد شاشة طلباتي الجديدة
-import 'rep_store_lite_screen.dart'; // ✅ استيراد شاشة المتجر الخفيفة
-import '../admin/offers_screen.dart'; // ✅ استيراد شاشة العروض المدمجة
+import 'goals_screen.dart';
+import 'my_customers_screen.dart';
+import 'my_orders_screen.dart';
+import 'rep_store_lite_screen.dart';
+import 'rep_reports_screen.dart'; // ✅ تم إضافة الاستيراد هنا
+import '../admin/offers_screen.dart';
 
 // --- الثوابت اللونية ---
 const Color kPrimaryColor = Color(0xFF3498db);
@@ -39,17 +40,12 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
   void initState() {
     super.initState();
     _checkUserDataAndDayStatus();
-    _setupNotifications(); // ✅ تشغيل فحص الإشعارات عند الدخول
+    _setupNotifications();
   }
 
-  // --- 🔔 إعدادات الإشعارات المؤكدة ---
   Future<void> _setupNotifications() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
-
-    // فحص الحالة الحالية
     NotificationSettings settings = await messaging.getNotificationSettings();
-
-    // 🟢 التعديل المأمن: إذا لم يكن الإذن "مسموحاً" بالفعل، اطلب الإذن واظهر الرسالة
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
       if (mounted) {
         bool? startRequest = await showDialog<bool>(
@@ -75,14 +71,8 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
             ],
           ),
         );
-
         if (startRequest == true) {
-          // طلب إذن النظام الفعلي
-          await messaging.requestPermission(
-            alert: true,
-            badge: true,
-            sound: true,
-          );
+          await messaging.requestPermission(alert: true, badge: true, sound: true);
         }
       }
     }
@@ -107,7 +97,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
           .where("repCode", isEqualTo: repData!['repCode'])
           .where("status", isEqualTo: "open")
           .limit(1);
-
       final querySnapshot = await q.get();
       if (querySnapshot.docs.isNotEmpty) {
         final docData = querySnapshot.docs[0].data();
@@ -236,8 +225,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                         onTap: () {
                           Navigator.pop(context);
                           Navigator.push(context, MaterialPageRoute(builder: (context) => const RepStoreLiteScreen()));
-                        }
-                    ),
+                        }),
                     _drawerItem(
                         Icons.track_changes_outlined,
                         "الأهداف",
@@ -245,8 +233,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                         onTap: () {
                           Navigator.pop(context);
                           Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
-                        }
-                    ),
+                        }),
                     _drawerItem(
                         Icons.people_outline,
                         "عملائي",
@@ -254,8 +241,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                         onTap: () {
                           Navigator.pop(context);
                           Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen()));
-                        }
-                    ),
+                        }),
                     _drawerItem(
                         Icons.receipt_outlined,
                         "طلباتي",
@@ -263,8 +249,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                         onTap: () {
                           Navigator.pop(context);
                           Navigator.push(context, MaterialPageRoute(builder: (context) => const MyOrdersScreen()));
-                        }
-                    ),
+                        }),
                     _drawerItem(
                         Icons.location_on_outlined,
                         "الزيارات",
@@ -278,8 +263,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                               const SnackBar(content: Text("❌ يجب بدء يوم العمل أولاً لتسجيل الزيارات")),
                             );
                           }
-                        }
-                    ),
+                        }),
                     _drawerItem(
                         Icons.local_offer_outlined,
                         "مركز العروض والجوائز",
@@ -287,9 +271,16 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                         onTap: () {
                           Navigator.pop(context);
                           Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
+                        }),
+                    _drawerItem(
+                        Icons.bar_chart_outlined, 
+                        "التقارير", 
+                        false,
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const RepReportsScreen()));
                         }
                     ),
-                    _drawerItem(Icons.bar_chart_outlined, "التقارير", false),
                   ],
                 ),
               ),
