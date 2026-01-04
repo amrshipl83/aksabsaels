@@ -42,15 +42,15 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     _setupNotifications(); // ✅ تشغيل فحص الإشعارات عند الدخول
   }
 
-  // --- 🔔 إعدادات الإشعارات مع الرسالة الاحترافية ---
+  // --- 🔔 إعدادات الإشعارات المؤكدة ---
   Future<void> _setupNotifications() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
-    
+
     // فحص الحالة الحالية
     NotificationSettings settings = await messaging.getNotificationSettings();
-    
-    if (settings.authorizationStatus == AuthorizationStatus.notDetermined) {
-      // إظهار الرسالة التوضيحية (متطلبات جوجل)
+
+    // 🟢 التعديل المأمن: إذا لم يكن الإذن "مسموحاً" بالفعل، اطلب الإذن واظهر الرسالة
+    if (settings.authorizationStatus != AuthorizationStatus.authorized) {
       if (mounted) {
         bool? startRequest = await showDialog<bool>(
           context: context,
@@ -77,6 +77,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
         );
 
         if (startRequest == true) {
+          // طلب إذن النظام الفعلي
           await messaging.requestPermission(
             alert: true,
             badge: true,

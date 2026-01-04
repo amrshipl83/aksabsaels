@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+// 🟢 إضافة استيراد صفحة المنتجات هنا
+import 'rep_products_screen.dart'; 
 
 class RepSubCategoriesScreen extends StatelessWidget {
   final String mainCategoryId;
@@ -30,7 +32,6 @@ class RepSubCategoriesScreen extends StatelessWidget {
           ),
         ),
         body: StreamBuilder<QuerySnapshot>(
-          // جلب الأقسام الفرعية المرتبطة بالقسم الرئيسي المختار
           stream: db.collection('subCategory')
               .where('mainId', isEqualTo: mainCategoryId)
               .where('status', isEqualTo: 'active')
@@ -39,7 +40,7 @@ class RepSubCategoriesScreen extends StatelessWidget {
           builder: (context, snapshot) {
             if (snapshot.hasError) return const Center(child: Text("حدث خطأ ما"));
             if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Color(0xFF4a6491)));
-            
+
             final docs = snapshot.data!.docs;
 
             if (docs.isEmpty) {
@@ -49,7 +50,7 @@ class RepSubCategoriesScreen extends StatelessWidget {
             return GridView.builder(
               padding: const EdgeInsets.all(15),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2, // عمودين كما في الويب
+                crossAxisCount: 2,
                 childAspectRatio: 1.1,
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
@@ -58,11 +59,20 @@ class RepSubCategoriesScreen extends StatelessWidget {
               itemBuilder: (context, index) {
                 var subCat = docs[index].data() as Map<String, dynamic>;
                 String subId = docs[index].id;
+                String subName = subCat['name'] ?? '';
 
                 return InkWell(
                   onTap: () {
-                    // الخطوة القادمة: الانتقال لصفحة المنتجات الخاصة بهذا القسم الفرعي
-                    print("فتح القسم الفرعي: $subId");
+                    // 🟢 تم التعديل هنا للانتقال لصفحة المنتجات
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => RepProductsScreen(
+                          subId: subId,
+                          subName: subName,
+                        ),
+                      ),
+                    );
                   },
                   child: Container(
                     decoration: BoxDecoration(
@@ -90,7 +100,7 @@ class RepSubCategoriesScreen extends StatelessWidget {
                         Padding(
                           padding: const EdgeInsets.only(bottom: 12, left: 8, right: 8),
                           child: Text(
-                            subCat['name'] ?? '',
+                            subName,
                             textAlign: TextAlign.center,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
