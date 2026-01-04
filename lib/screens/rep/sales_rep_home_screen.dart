@@ -8,6 +8,7 @@ import 'visit_screen.dart';
 import 'goals_screen.dart'; // استيراد شاشة الأهداف
 import 'my_customers_screen.dart'; // ✅ استيراد شاشة عملائي الجديدة
 import 'my_orders_screen.dart'; // ✅ استيراد شاشة طلباتي الجديدة
+import 'rep_store_lite_screen.dart'; // ✅ استيراد شاشة المتجر الخفيفة
 import '../admin/offers_screen.dart'; // ✅ استيراد شاشة العروض المدمجة
 
 // --- الثوابت اللونية ---
@@ -180,15 +181,23 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                   padding: EdgeInsets.zero,
                   children: [
                     _drawerItem(Icons.dashboard_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
-                    _drawerItem(Icons.storefront_outlined, "المتجر", false),
                     _drawerItem(
-                        Icons.track_changes_outlined,
-                        "الأهداف",
-                        false,
-                        onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
-                        }
+                      Icons.storefront_outlined, 
+                      "المتجر", 
+                      false,
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => const RepStoreLiteScreen()));
+                      }
+                    ),
+                    _drawerItem(
+                      Icons.track_changes_outlined,
+                      "الأهداف",
+                      false,
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
+                      }
                     ),
                     _drawerItem(
                       Icons.people_outline, 
