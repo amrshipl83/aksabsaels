@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:sizer/sizer.dart';
 import 'dart:convert';
 import 'add_new_customer.dart';
 
@@ -20,7 +21,9 @@ class _VisitScreenState extends State<VisitScreen> {
   Map<String, dynamic>? _userData;
 
   List<DocumentSnapshot> _customers = [];
+  List<DocumentSnapshot> _filteredCustomers = []; // للقائمة المفلترة والبحث
   String? _selectedCustomerId;
+  final TextEditingController _searchController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
   String? _visitStatus;
 
@@ -30,6 +33,7 @@ class _VisitScreenState extends State<VisitScreen> {
     _checkInitialStatus();
   }
 
+  // 1. فحص الحالة وطلب الإذن مع الإفصاح
   Future<void> _checkInitialStatus() async {
     final prefs = await SharedPreferences.getInstance();
     final userDataString = prefs.getString('userData');
@@ -42,6 +46,7 @@ class _VisitScreenState extends State<VisitScreen> {
     _userData = jsonDecode(userDataString);
     final repCode = _userData!['repCode'];
 
+    // فحص يوم العمل (Log)
     final logQuery = await FirebaseFirestore.instance
         .collection('daily_logs')
         .where('repCode', isEqualTo: repCode)
@@ -63,72 +68,108 @@ class _VisitScreenState extends State<VisitScreen> {
         _isLoading = false;
       });
     } else {
-      _loadCustomers(repCode);
+      // إظهار رسالة الإفصاح قبل جلب العملاء لترتيبهم
+      _showLocationDisclosure(repCode);
     }
   }
 
+  // رسالة إفصاح جوجل (Prominent Disclosure)
+  void _showLocationDisclosure(String repCode) async {
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
+      _loadCustomers(repCode);
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.gps_fixed, color: Color(0xFF43B97F)),
+            SizedBox(width: 10),
+            Text("تحديد أقرب العملاء"),
+          ],
+        ),
+        content: const Text(
+          "يحتاج التطبيق للوصول لموقعك لترتيب قائمة العملاء حسب الأقرب إليك حالياً، مما يسهل عليك العثور على العميل وبدء الزيارة بسرعة.",
+          style: TextStyle(fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF43B97F)),
+            onPressed: () {
+              Navigator.pop(context);
+              _loadCustomers(repCode);
+            },
+            child: const Text("موافق", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // تحميل العملاء مع الترتيب الجغرافي
   Future<void> _loadCustomers(String repCode) async {
+    setState(() => _isLoading = true);
     try {
+      // طلب الإذن الرسمي
+      LocationPermission permission = await Geolocator.requestPermission();
+      Position? currentPos;
+      if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
+        currentPos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      }
+
       final snap = await FirebaseFirestore.instance
           .collection('users')
           .where('repCode', isEqualTo: repCode)
           .where('role', isEqualTo: 'buyer')
           .get();
 
+      List<DocumentSnapshot> tempCustomers = snap.docs;
+
+      // الترتيب الجغرافي (Geo-Sorting)
+      if (currentPos != null) {
+        tempCustomers.sort((a, b) {
+          try {
+            var locA = a['location'] as Map?;
+            var locB = b['location'] as Map?;
+            if (locA == null || locB == null) return 1;
+            double distA = Geolocator.distanceBetween(currentPos!.latitude, currentPos!.longitude, locA['lat'], locA['lng']);
+            double distB = Geolocator.distanceBetween(currentPos!.latitude, currentPos!.longitude, locB['lat'], locB['lng']);
+            return distA.compareTo(distB);
+          } catch (e) { return 0; }
+        });
+      }
+
       setState(() {
-        _customers = snap.docs;
+        _customers = tempCustomers;
+        _filteredCustomers = tempCustomers;
         _isLoading = false;
       });
     } catch (e) {
-      debugPrint("Error loading customers: $e");
+      debugPrint("Error: $e");
+      setState(() => _isLoading = false);
     }
   }
 
-  // دالة جلب الموقع مع طلب الإذن (تم تحسينها لتتوافق مع منطق الـ GPS)
-  Future<Position?> _getCurrentLocation() async {
-    bool serviceEnabled;
-    LocationPermission permission;
-
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("❌ يرجى تفعيل خدمة الموقع (GPS)")),
-      );
-      return null;
-    }
-
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("❌ تم رفض إذن الموقع")),
-        );
-        return null;
-      }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("❌ إذن الموقع مرفوض نهائياً من الإعدادات")),
-      );
-      return null;
-    }
-
-    return await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+  void _filterSearch(String query) {
+    setState(() {
+      _filteredCustomers = _customers.where((doc) {
+        final name = doc['fullname'].toString().toLowerCase();
+        final phone = doc['phone'].toString();
+        return name.contains(query.toLowerCase()) || phone.contains(query);
+      }).toList();
+    });
   }
 
   Future<void> _startVisit() async {
     if (_selectedCustomerId == null) return;
-
     setState(() => _isLoading = true);
-
-    // جلب الموقع قبل بدء الزيارة
-    Position? position = await _getCurrentLocation();
     
-    // إذا لم يتمكن من جلب الموقع، نعطي خياراً للمندوب (أو نمنعه حسب رغبتك)
-    // هنا سنكمل الزيارة حتى لو الموقع فارغ لكن سنحاول جلبه أولاً
-    
+    Position? position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
     final customer = _customers.firstWhere((doc) => doc.id == _selectedCustomerId);
     final customerName = customer['fullname'];
 
@@ -139,13 +180,10 @@ class _VisitScreenState extends State<VisitScreen> {
       'customerName': customerName,
       'startTime': FieldValue.serverTimestamp(),
       'status': "in_progress",
-      'location': position != null
-          ? {'lat': position.latitude, 'lng': position.longitude}
-          : null,
+      'location': position != null ? {'lat': position.latitude, 'lng': position.longitude} : null,
     };
 
     final docRef = await FirebaseFirestore.instance.collection('visits').add(visitData);
-
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('currentVisitId', docRef.id);
     await prefs.setString('currentCustomerName', customerName);
@@ -160,9 +198,8 @@ class _VisitScreenState extends State<VisitScreen> {
 
   Future<void> _endVisit() async {
     if (_visitStatus == null) return;
-
     setState(() => _isLoading = true);
-
+    
     await FirebaseFirestore.instance.collection('visits').doc(_currentVisitId).update({
       'status': _visitStatus,
       'notes': _notesController.text,
@@ -185,70 +222,91 @@ class _VisitScreenState extends State<VisitScreen> {
   }
 
   void _showErrorPage(String msg) {
-    if (!mounted) return;
-    setState(() => _isLoading = false);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-
     return Scaffold(
       appBar: AppBar(
-        title: const Text("تسجيل زيارة عميل", style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text("زيارات المناديب", style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xFF43B97F),
         foregroundColor: Colors.white,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: _isVisiting ? _buildEndVisitUI() : _buildStartVisitUI(),
-      ),
+      body: _isLoading 
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF43B97F)))
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(20.0),
+              child: _isVisiting ? _buildEndVisitUI() : _buildStartVisitUI(),
+            ),
     );
   }
 
   Widget _buildStartVisitUI() {
     return Column(
       children: [
-        const Icon(Icons.location_on, size: 80, color: Color(0xFF43B97F)),
-        const SizedBox(height: 10),
-        const Text("اختر العميل من قائمتك", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 20),
-        DropdownButtonFormField<String>(
-          decoration: const InputDecoration(border: OutlineInputBorder(), labelText: "قائمة العملاء"),
-          value: _selectedCustomerId,
-          items: _customers.map((doc) {
-            return DropdownMenuItem(value: doc.id, child: Text(doc['fullname']));
-          }).toList(),
-          onChanged: (val) => setState(() => _selectedCustomerId = val),
-        ),
-        const SizedBox(height: 20),
-        ElevatedButton.icon(
-          onPressed: _selectedCustomerId == null ? null : _startVisit,
-          icon: const Icon(Icons.play_arrow),
-          label: const Text("بدء الزيارة الآن"),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF43B97F),
-            foregroundColor: Colors.white,
-            minimumSize: const Size(double.infinity, 55),
+        TextField(
+          controller: _searchController,
+          onChanged: _filterSearch,
+          decoration: InputDecoration(
+            hintText: "بحث باسم المحل أو الرقم...",
+            prefixIcon: const Icon(Icons.search, color: Color(0xFF43B97F)),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
+            filled: true,
+            fillColor: Colors.white,
           ),
         ),
-        const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Divider()),
-        ElevatedButton.icon(
-          onPressed: () async {
-            await Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const AddNewCustomerScreen()),
-            );
-            _loadCustomers(_userData!['repCode']);
-          },
-          icon: const Icon(Icons.person_add),
-          label: const Text("تسجيل عميل جديد (غير موجود بالقائمة)"),
+        const SizedBox(height: 15),
+        const Text("اختر العميل (الأقرب لك دائماً في البداية)", 
+            style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        Container(
+          height: 40.h,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: _filteredCustomers.isEmpty 
+            ? const Center(child: Text("لا يوجد عملاء متاحين"))
+            : ListView.builder(
+                itemCount: _filteredCustomers.length,
+                itemBuilder: (context, index) {
+                  var doc = _filteredCustomers[index];
+                  bool isSelected = _selectedCustomerId == doc.id;
+                  return ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: isSelected ? const Color(0xFF43B97F) : Colors.grey[100],
+                      child: Icon(Icons.store, color: isSelected ? Colors.white : Colors.grey),
+                    ),
+                    title: Text(doc['fullname'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(doc['phone']),
+                    onTap: () => setState(() => _selectedCustomerId = doc.id),
+                    trailing: isSelected ? const Icon(Icons.check_circle, color: Color(0xFF43B97F)) : null,
+                  );
+                },
+              ),
+        ),
+        const SizedBox(height: 20),
+        ElevatedButton(
+          onPressed: _selectedCustomerId == null ? null : _startVisit,
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blue.shade700,
-            foregroundColor: Colors.white,
+            backgroundColor: const Color(0xFF43B97F),
             minimumSize: const Size(double.infinity, 55),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: const Text("بدء الزيارة الآن", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        ),
+        const SizedBox(height: 15),
+        OutlinedButton.icon(
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const AddNewCustomerScreen())),
+          icon: const Icon(Icons.person_add),
+          label: const Text("تسجيل عميل جديد"),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(double.infinity, 50),
+            side: const BorderSide(color: Colors.blue),
+            foregroundColor: Colors.blue,
           ),
         ),
       ],
@@ -257,29 +315,25 @@ class _VisitScreenState extends State<VisitScreen> {
 
   Widget _buildEndVisitUI() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
           padding: const EdgeInsets.all(15),
-          decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(10)),
+          decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(15)),
           child: Row(
             children: [
-              const Icon(Icons.store, color: Colors.blue),
+              const Icon(Icons.timer, color: Colors.green),
               const SizedBox(width: 10),
-              Expanded(
-                child: Text("أنت الآن في زيارة لـ: $_currentCustomerName",
-                    style: const TextStyle(fontSize: 16, color: Colors.blue, fontWeight: FontWeight.bold)),
-              ),
+              Text("زيارة نشطة لـ: $_currentCustomerName", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
             ],
           ),
         ),
-        const SizedBox(height: 25),
+        const SizedBox(height: 20),
         DropdownButtonFormField<String>(
           decoration: const InputDecoration(border: OutlineInputBorder(), labelText: "نتيجة الزيارة"),
           items: const [
             DropdownMenuItem(value: "sold", child: Text("✅ تم عمل طلبية")),
             DropdownMenuItem(value: "followup", child: Text("⏳ متابعة لاحقاً")),
-            DropdownMenuItem(value: "busy", child: Text("🚪 العميل غير متاح / مشغول")),
+            DropdownMenuItem(value: "busy", child: Text("🚪 العميل غير متاح")),
             DropdownMenuItem(value: "rejected", child: Text("❌ مرفوضة")),
           ],
           onChanged: (val) => setState(() => _visitStatus = val),
@@ -288,21 +342,17 @@ class _VisitScreenState extends State<VisitScreen> {
         TextField(
           controller: _notesController,
           maxLines: 4,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            labelText: "ملاحظات وتفاصيل الزيارة",
-            alignLabelWithHint: true,
-          ),
+          decoration: const InputDecoration(border: OutlineInputBorder(), labelText: "ملاحظات الزيارة"),
         ),
         const SizedBox(height: 30),
         ElevatedButton(
           onPressed: _visitStatus == null ? null : _endVisit,
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.redAccent,
-            foregroundColor: Colors.white,
             minimumSize: const Size(double.infinity, 60),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
-          child: const Text("إنهاء الزيارة وحفظ البيانات", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          child: const Text("إنهاء وحفظ الزيارة", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         ),
       ],
     );

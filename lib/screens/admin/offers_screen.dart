@@ -16,14 +16,11 @@ class _OffersScreenState extends State<OffersScreen> {
   final Color kTargetColor = const Color(0xFFE67E22);  // التارجت
   final Color kSidebarColor = const Color(0xFF2F3542);
 
-  // دالة لجلب بيانات التاجر لتمييز العرض
   Future<Map<String, dynamic>?> _getMerchantData(String? sellerId) async {
     if (sellerId == null || sellerId.isEmpty) return null;
     try {
       var doc = await FirebaseFirestore.instance.collection('sellers').doc(sellerId).get();
       if (doc.exists) return doc.data();
-      
-      // محاولة البحث بحقل id إذا لم يكن الـ docId هو الـ sellerId
       var query = await FirebaseFirestore.instance
           .collection('sellers')
           .where('id', isEqualTo: sellerId)
@@ -43,8 +40,8 @@ class _OffersScreenState extends State<OffersScreen> {
       child: Scaffold(
         backgroundColor: const Color(0xFFF8F9FD),
         appBar: AppBar(
-          title: Text("مركز العروض والجوائز", 
-              style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.w900)),
+          title: Text("مركز العروض والجوائز",
+              style: TextStyle(fontSize: 19.sp, fontWeight: FontWeight.w900)), // تكبير العنوان
           centerTitle: true,
           backgroundColor: Colors.white,
           elevation: 0,
@@ -52,7 +49,7 @@ class _OffersScreenState extends State<OffersScreen> {
             indicatorColor: kPrimaryColor,
             labelColor: kPrimaryColor,
             unselectedLabelColor: Colors.grey,
-            labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp),
+            labelStyle: TextStyle(fontWeight: FontWeight.w900, fontSize: 14.sp), // خط أوضح للتبويبات
             tabs: const [
               Tab(text: "كاش باك مالي", icon: Icon(Icons.monetization_on_outlined)),
               Tab(text: "هدايا عينية", icon: Icon(Icons.card_giftcard)),
@@ -85,7 +82,6 @@ class _OffersScreenState extends State<OffersScreen> {
         }).toList();
 
         if (docs.isEmpty) return _buildEmptyState("لا توجد قواعد كاش باك حالياً");
-
         return ListView.builder(
           padding: EdgeInsets.all(5.w),
           itemCount: docs.length,
@@ -108,11 +104,12 @@ class _OffersScreenState extends State<OffersScreen> {
           if (d['expiryDate'] == null) return true;
           try {
             return DateTime.parse(d['expiryDate']).isAfter(DateTime.now());
-          } catch (e) { return true; }
+          } catch (e) {
+            return true;
+          }
         }).toList();
 
         if (docs.isEmpty) return _buildEmptyState("لا توجد هدايا متاحة");
-
         return ListView.builder(
           padding: EdgeInsets.all(5.w),
           itemCount: docs.length,
@@ -143,7 +140,7 @@ class _OffersScreenState extends State<OffersScreen> {
           child: Column(
             children: [
               Container(
-                padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 1.h),
+                padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 1.2.h),
                 decoration: BoxDecoration(
                   color: (hasTarget ? kTargetColor : kPrimaryColor).withOpacity(0.1),
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -151,21 +148,28 @@ class _OffersScreenState extends State<OffersScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _badge(hasTarget ? "عرض بتارجت" : "كاش باك مباشر", hasTarget ? kTargetColor : kPrimaryColor),
-                    Text(valueText, style: TextStyle(color: hasTarget ? kTargetColor : kPrimaryColor, fontWeight: FontWeight.w900, fontSize: 16.sp)),
+                    _badge(hasTarget ? "عرض بتارجت" : "كاش باك مباشر",
+                        hasTarget ? kTargetColor : kPrimaryColor),
+                    Text(valueText,
+                        style: TextStyle(
+                            color: hasTarget ? kTargetColor : kPrimaryColor,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 17.sp)),
                   ],
                 ),
               ),
               ListTile(
                 contentPadding: EdgeInsets.all(4.w),
                 leading: _buildMerchantLogo(merchant?['logoUrl'] ?? merchant?['merchantLogoUrl']),
-                title: Text(data['description'] ?? '', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15.sp)),
+                title: Text(data['description'] ?? '',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16.sp, color: kSidebarColor)),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     SizedBox(height: 1.h),
                     _infoRow(Icons.storefront, "التاجر: ${merchant?['merchantName'] ?? 'كل التجار'}"),
-                    if (hasTarget) _infoRow(Icons.shopping_bag_outlined, "الشرط: شراء بـ ${data['minPurchaseAmount']} ج.م"),
+                    if (hasTarget)
+                      _infoRow(Icons.shopping_bag_outlined, "الشرط: شراء بـ ${data['minPurchaseAmount']} ج.م"),
                     _infoRow(Icons.event_available, "ينتهي في: ${_formatTS(data['endDate'])}"),
                   ],
                 ),
@@ -180,11 +184,16 @@ class _OffersScreenState extends State<OffersScreen> {
   Widget _buildGiftCard(DocumentSnapshot doc) {
     var data = doc.data() as Map<String, dynamic>;
     var trigger = data['trigger'] as Map<String, dynamic>;
+    // دمج اسم المنتج الهدية في سطر الوصف
+    String giftFullName = "الهدية: ${data['giftQuantityPerBase']} ${data['giftUnitName']} من ${data['giftProductName'] ?? 'منتج مميز'}";
 
     return FutureBuilder<Map<String, dynamic>?>(
       future: _getMerchantData(data['sellerId']),
       builder: (context, mSnapshot) {
         var merchant = mSnapshot.data;
+        // توحيد جلب الصورة
+        String? finalImg = data['imageUrl'] ?? data['giftProductImage'] ?? data['giftImageUrl'];
+
         return Container(
           margin: EdgeInsets.only(bottom: 2.h),
           decoration: BoxDecoration(
@@ -196,25 +205,29 @@ class _OffersScreenState extends State<OffersScreen> {
             children: [
               Container(
                 width: double.infinity,
-                padding: EdgeInsets.symmetric(vertical: 1.h),
-                decoration: BoxDecoration(color: kGiftColor, borderRadius: const BorderRadius.vertical(top: Radius.circular(20))),
-                child: Text("عرض هدايا مميز", textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white, fontSize: 10.sp, fontWeight: FontWeight.bold)),
+                padding: EdgeInsets.symmetric(vertical: 1.2.h),
+                decoration: BoxDecoration(
+                    color: kGiftColor,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20))),
+                child: Text("عرض هدايا مميز",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white, fontSize: 11.sp, fontWeight: FontWeight.w900)),
               ),
               Padding(
                 padding: EdgeInsets.all(4.w),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildProductImage(data['giftProductImage']),
+                    _buildProductImage(finalImg),
                     SizedBox(width: 4.w),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(data['promoName'] ?? '', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14.sp, color: kSidebarColor)),
-                          const Divider(),
-                          _infoRow(Icons.card_giftcard, "الهدية: ${data['giftQuantityPerBase']} ${data['giftUnitName']}"),
+                          Text(data['promoName'] ?? '',
+                              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16.sp, color: kSidebarColor)),
+                          const Divider(thickness: 1.2),
+                          _infoRow(Icons.card_giftcard, giftFullName),
                           _infoRow(Icons.store, "من: ${merchant?['merchantName'] ?? 'مورد معتمد'}"),
                           _infoRow(Icons.bolt, "الشرط: ${_getTriggerText(trigger)}"),
                         ],
@@ -232,32 +245,43 @@ class _OffersScreenState extends State<OffersScreen> {
 
   Widget _buildMerchantLogo(String? url) {
     return Container(
-      width: 12.w, height: 12.w,
-      decoration: BoxDecoration(color: Colors.grey[50], shape: BoxShape.circle, border: Border.all(color: Colors.grey.shade200)),
+      width: 14.w,
+      height: 14.w,
+      decoration: BoxDecoration(
+          color: Colors.grey[50],
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.grey.shade200)),
       child: (url != null && url.isNotEmpty)
           ? ClipRRect(borderRadius: BorderRadius.circular(100), child: Image.network(url, fit: BoxFit.cover))
-          : Icon(Icons.store_mall_directory_outlined, color: Colors.grey, size: 18.sp),
+          : Icon(Icons.store_mall_directory_outlined, color: Colors.grey, size: 20.sp),
     );
   }
 
   Widget _buildProductImage(String? url) {
     return Container(
-      width: 22.w, height: 22.w,
-      decoration: BoxDecoration(color: const Color(0xFFF1F2F6), borderRadius: BorderRadius.circular(15)),
+      width: 24.w,
+      height: 24.w,
+      decoration: BoxDecoration(
+          color: const Color(0xFFF1F2F6), borderRadius: BorderRadius.circular(15)),
       child: (url != null && url.isNotEmpty)
           ? ClipRRect(borderRadius: BorderRadius.circular(15), child: Image.network(url, fit: BoxFit.cover))
-          : Icon(Icons.redeem_rounded, color: kGiftColor, size: 35.sp),
+          : Icon(Icons.redeem_rounded, color: kGiftColor, size: 38.sp),
     );
   }
 
   Widget _infoRow(IconData icon, String text) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 0.4.h),
+      padding: EdgeInsets.symmetric(vertical: 0.6.h),
       child: Row(
         children: [
-          Icon(icon, size: 12.sp, color: Colors.blueGrey),
-          SizedBox(width: 2.w),
-          Expanded(child: Text(text, style: TextStyle(fontSize: 12.sp, color: kSidebarColor, fontWeight: FontWeight.w500))),
+          Icon(icon, size: 14.sp, color: Colors.blueGrey),
+          SizedBox(width: 3.w),
+          Expanded(
+              child: Text(text,
+                  style: TextStyle(
+                      fontSize: 13.sp, // خط أكبر قليلاً
+                      color: kSidebarColor,
+                      fontWeight: FontWeight.w700))), // سماكة أكبر
         ],
       ),
     );
@@ -265,9 +289,11 @@ class _OffersScreenState extends State<OffersScreen> {
 
   Widget _badge(String text, Color color) {
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 3.w, vertical: 0.5.h),
-      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
-      child: Text(text, style: TextStyle(color: color, fontSize: 10.sp, fontWeight: FontWeight.bold)),
+      padding: EdgeInsets.symmetric(horizontal: 3.w, vertical: 0.6.h),
+      decoration: BoxDecoration(
+          color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+      child: Text(text,
+          style: TextStyle(color: color, fontSize: 11.sp, fontWeight: FontWeight.w900)),
     );
   }
 
@@ -276,8 +302,14 @@ class _OffersScreenState extends State<OffersScreen> {
     return "شراء ${trigger['triggerQuantityBase']} من ${trigger['productName']}";
   }
 
-  String _formatTS(dynamic ts) => ts != null ? DateFormat('yyyy/MM/dd').format(ts.toDate()) : "غير محدد";
+  String _formatTS(dynamic ts) =>
+      ts != null ? DateFormat('yyyy/MM/dd').format(ts.toDate()) : "غير محدد";
 
-  Widget _buildEmptyState(String msg) => Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.layers_clear_outlined, size: 50.sp, color: Colors.grey.shade300), SizedBox(height: 2.h), Text(msg, style: TextStyle(color: Colors.grey, fontSize: 14.sp))]));
+  Widget _buildEmptyState(String msg) => Center(
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.layers_clear_outlined, size: 55.sp, color: Colors.grey.shade300),
+        SizedBox(height: 2.h),
+        Text(msg, style: TextStyle(color: Colors.grey, fontSize: 15.sp, fontWeight: FontWeight.bold))
+      ]));
 }
 
