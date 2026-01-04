@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // ✅ لإرسال التوكن
+import 'package:http/http.dart' as http; // ✅ للربط مع الرابط المطلوب
 import 'dart:convert';
 import 'register_screen.dart';
 
@@ -19,22 +21,42 @@ class _LoginScreenState extends State<LoginScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   String? _errorMessage;
-  bool _isLoading = true; // نبدأ بـ true حتى ينتهي الفحص التلقائي
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _checkExistingLogin(); // فحص إذا كان المستخدم مسجلاً مسبقاً
+    _checkExistingLogin();
   }
 
-  // --- وظيفة الفحص التلقائي عند فتح التطبيق ---
+  // --- وظيفة الربط مع رابط الإشعارات الجديد ---
+  Future<void> _registerNotification(String userId, String role, String address) async {
+    try {
+      String? token = await FirebaseMessaging.instance.getToken();
+      if (token == null) return;
+
+      final response = await http.post(
+        Uri.parse('https://5uex7vzy64.execute-api.us-east-1.amazonaws.com/V2/new_nofiction'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'userId': userId,
+          'fcmToken': token,
+          'role': role,
+          'address': address,
+        }),
+      );
+      print("Notification Sync Status: ${response.statusCode}");
+    } catch (e) {
+      print("Notification Sync Error: $e");
+    }
+  }
+
   Future<void> _checkExistingLogin() async {
     final prefs = await SharedPreferences.getInstance();
     final String? userRole = prefs.getString('userRole');
     final String? userData = prefs.getString('userData');
 
     if (userRole != null && userData != null) {
-      // توجيه المستخدم فوراً بناءً على دوره المخزن
       if (mounted) {
         if (userRole == 'sales_rep') {
           Navigator.of(context).pushReplacementNamed('/rep_home');
@@ -43,7 +65,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
     } else {
-      setState(() => _isLoading = false); // إظهار واجهة الدخول إذا لم يوجد مستخدم
+      setState(() => _isLoading = false);
     }
   }
 
@@ -58,6 +80,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _isLoading = true;
       _errorMessage = null;
     });
+
     String input = _phoneController.text.trim();
     String smartEmail = input.contains('@') ? input : "$input@aksab.com";
     final password = _passwordController.text.trim();
@@ -74,7 +97,6 @@ class _LoginScreenState extends State<LoginScreen> {
       DocumentSnapshot? userDocSnapshot;
       String? userRole;
 
-      // البحث في المناديب
       final salesRepQuery = await FirebaseFirestore.instance
           .collection('salesRep')
           .where('uid', isEqualTo: user.uid)
@@ -86,7 +108,6 @@ class _LoginScreenState extends State<LoginScreen> {
         userRole = 'sales_rep';
       }
 
-      // البحث في المدراء/المشرفين إذا لم يجد مندوب
       if (userDocSnapshot == null) {
         final managersQuery = await FirebaseFirestore.instance
             .collection('managers')
@@ -101,13 +122,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (userDocSnapshot != null && userRole != null) {
         final userDocData = userDocSnapshot.data() as Map<String, dynamic>;
-
-        // 🛑 دمج التعديل المطلوب: تخزين معرف الوثيقة ونسيان الـ uid في التعاملات اللاحقة
         userDocData['docId'] = userDocSnapshot.id;
 
         if (userDocData['status'] == 'approved') {
+          // ✅ تنفيذ عملية الربط مع الرابط الخارجي (Lambda)
+          await _registerNotification(
+            user.uid, 
+            userRole, 
+            userDocData['address'] ?? ""
+          );
+
           final prefs = await SharedPreferences.getInstance();
-          // حفظ البيانات لفتح التطبيق تلقائياً المرة القادمة (مع الـ docId الجديد)
           await prefs.setString('userData', json.encode(userDocData, toEncodable: _encoder));
           await prefs.setString('userRole', userRole);
 
@@ -141,7 +166,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // إذا كان جاري التحميل (أو الفحص التلقائي) تظهر شاشة بيضاء أو لوغو
     if (_isLoading && _phoneController.text.isEmpty) {
       return const Scaffold(body: Center(child: CircularProgressIndicator(color: kPrimaryColor)));
     }

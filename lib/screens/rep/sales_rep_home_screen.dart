@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // ✅ استيراد للإشعارات
 import 'dart:convert';
 import 'sales_rep_dashboard.dart';
 import 'visit_screen.dart';
@@ -38,6 +39,52 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
   void initState() {
     super.initState();
     _checkUserDataAndDayStatus();
+    _setupNotifications(); // ✅ تشغيل فحص الإشعارات عند الدخول
+  }
+
+  // --- 🔔 إعدادات الإشعارات مع الرسالة الاحترافية ---
+  Future<void> _setupNotifications() async {
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+    
+    // فحص الحالة الحالية
+    NotificationSettings settings = await messaging.getNotificationSettings();
+    
+    if (settings.authorizationStatus == AuthorizationStatus.notDetermined) {
+      // إظهار الرسالة التوضيحية (متطلبات جوجل)
+      if (mounted) {
+        bool? startRequest = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: const Text('تفعيل التنبيهات', textAlign: TextAlign.center),
+            content: const Text(
+              'يرجى تفعيل التنبيهات لتتمكن من استلام تحديثات الطلبات، تنبيهات الأهداف الميدانية، والرسائل الهامة من الإدارة فور صدورها.',
+              textAlign: TextAlign.center,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('لاحقاً', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(backgroundColor: kPrimaryColor),
+                child: const Text('موافق', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        );
+
+        if (startRequest == true) {
+          await messaging.requestPermission(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+        }
+      }
+    }
   }
 
   Future<void> _checkUserDataAndDayStatus() async {
@@ -182,40 +229,40 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                   children: [
                     _drawerItem(Icons.dashboard_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
                     _drawerItem(
-                      Icons.storefront_outlined, 
-                      "المتجر", 
-                      false,
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(context, MaterialPageRoute(builder: (context) => const RepStoreLiteScreen()));
-                      }
+                        Icons.storefront_outlined,
+                        "المتجر",
+                        false,
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const RepStoreLiteScreen()));
+                        }
                     ),
                     _drawerItem(
-                      Icons.track_changes_outlined,
-                      "الأهداف",
-                      false,
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
-                      }
+                        Icons.track_changes_outlined,
+                        "الأهداف",
+                        false,
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
+                        }
                     ),
                     _drawerItem(
-                      Icons.people_outline, 
-                      "عملائي", 
-                      false,
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen()));
-                      }
+                        Icons.people_outline,
+                        "عملائي",
+                        false,
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen()));
+                        }
                     ),
                     _drawerItem(
-                      Icons.receipt_outlined, 
-                      "طلباتي", 
-                      false,
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(context, MaterialPageRoute(builder: (context) => const MyOrdersScreen()));
-                      }
+                        Icons.receipt_outlined,
+                        "طلباتي",
+                        false,
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const MyOrdersScreen()));
+                        }
                     ),
                     _drawerItem(
                         Icons.location_on_outlined,
