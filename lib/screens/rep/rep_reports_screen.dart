@@ -24,9 +24,9 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   double totalSales = 0.0;
   Map<String, double> salesByStatus = {};
   Map<String, int> ordersCountByStatus = {};
-  
+
   // الفلتر الافتراضي: الشهر الحالي
-  String _selectedFilter = 'month'; 
+  String _selectedFilter = 'month';
 
   @override
   void initState() {
@@ -46,7 +46,6 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   Future<void> _fetchOrders() async {
     setState(() => _isLoading = true);
     try {
-      // جلب طلبات المندوب بناءً على كوده الخاص لضمان الخصوصية
       final snapshot = await FirebaseFirestore.instance
           .collection('orders')
           .where('buyer.repCode', isEqualTo: repData!['repCode'])
@@ -55,32 +54,30 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
       double tempTotal = 0;
       Map<String, double> tempStatusSales = {};
       Map<String, int> tempStatusCount = {};
-      
+
       DateTime now = DateTime.now();
 
       for (var doc in snapshot.docs) {
         var data = doc.data();
-        
-        // تحويل تاريخ Firestore (Timestamp) إلى DateTime
         DateTime? orderDate;
+
         if (data['createdAt'] != null && data['createdAt'] is Timestamp) {
           orderDate = (data['createdAt'] as Timestamp).toDate();
         }
 
-        // --- منطق الفلترة البرمجية المضمون ---
         bool matchesFilter = true;
         if (_selectedFilter != 'all') {
           if (orderDate != null) {
             if (_selectedFilter == 'day') {
-              matchesFilter = orderDate.year == now.year && 
-                              orderDate.month == now.month && 
-                              orderDate.day == now.day;
+              matchesFilter = orderDate.year == now.year &&
+                  orderDate.month == now.month &&
+                  orderDate.day == now.day;
             } else if (_selectedFilter == 'month') {
-              matchesFilter = orderDate.year == now.year && 
-                              orderDate.month == now.month;
+              // تم تعديل المقارنة لضمان الدقة في فلتر الشهر
+              matchesFilter = orderDate.year == now.year && orderDate.month == now.month;
             }
           } else {
-            matchesFilter = false; 
+            matchesFilter = false;
           }
         }
 
@@ -106,7 +103,6 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
     }
   }
 
-  // --- 📄 إنشاء ملف PDF بتنسيق متوافق مع أحدث نسخة ---
   Future<void> _generatePdf() async {
     final pdf = pw.Document();
     final font = await PdfGoogleFonts.almaraiRegular();
@@ -123,14 +119,18 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text('اكسب - تقرير أداء المندوب', style: pw.TextStyle(font: boldFont, fontSize: 18, color: PdfColors.green)),
-                  pw.Text(DateTime.now().toString().substring(0, 10), style: pw.TextStyle(font: font, fontSize: 12)),
+                  pw.Text('اكسب - تقرير أداء المندوب',
+                      style: pw.TextStyle(font: boldFont, fontSize: 18, color: PdfColors.green)),
+                  pw.Text(DateTime.now().toString().substring(0, 10),
+                      style: pw.TextStyle(font: font, fontSize: 12)),
                 ],
               ),
               pw.Divider(thickness: 2, color: PdfColors.grey300),
               pw.SizedBox(height: 20),
-              pw.Text('اسم المندوب: ${repData?['fullname']}', style: pw.TextStyle(font: font, fontSize: 14)),
-              pw.Text('كود المندوب: ${repData?['repCode']}', style: pw.TextStyle(font: font, fontSize: 14)),
+              pw.Text('اسم المندوب: ${repData?['fullname']}',
+                  style: pw.TextStyle(font: font, fontSize: 14)),
+              pw.Text('كود المندوب: ${repData?['repCode']}',
+                  style: pw.TextStyle(font: font, fontSize: 14)),
               pw.SizedBox(height: 20),
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
@@ -138,13 +138,17 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text('إجمالي مبيعات الفترة:', style: pw.TextStyle(font: boldFont, fontSize: 16)),
-                    pw.Text('${totalSales.toStringAsFixed(2)} ج.م', style: pw.TextStyle(font: boldFont, fontSize: 16, color: PdfColors.green)),
+                    pw.Text('إجمالي مبيعات الفترة:',
+                        style: pw.TextStyle(font: boldFont, fontSize: 16)),
+                    pw.Text('${totalSales.toStringAsFixed(2)} ج.م',
+                        style: pw.TextStyle(
+                            font: boldFont, fontSize: 16, color: PdfColors.green)),
                   ],
                 ),
               ),
               pw.SizedBox(height: 30),
-              pw.Text('تفصيل المبيعات حسب الحالة:', style: pw.TextStyle(font: boldFont, fontSize: 14)),
+              pw.Text('تفصيل المبيعات حسب الحالة:',
+                  style: pw.TextStyle(font: boldFont, fontSize: 14)),
               pw.SizedBox(height: 10),
               pw.TableHelper.fromTextArray(
                 cellStyle: pw.TextStyle(font: font),
@@ -154,10 +158,10 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
                 data: <List<String>>[
                   ['الحالة', 'عدد الطلبات', 'القيمة الإجمالية'],
                   ...salesByStatus.entries.map((e) => [
-                    e.key,
-                    ordersCountByStatus[e.key].toString(),
-                    '${e.value.toStringAsFixed(2)} ج.م'
-                  ]),
+                        e.key,
+                        ordersCountByStatus[e.key].toString(),
+                        '${e.value.toStringAsFixed(2)} ج.م'
+                      ]),
                 ],
               ),
             ],
@@ -187,29 +191,32 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
             )
           ],
         ),
-        body: Column(
-          children: [
-            _buildFilterTabs(),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator(color: kPrimaryColor))
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        children: [
-                          _buildTotalCard(),
-                          const SizedBox(height: 20),
-                          if (salesByStatus.isNotEmpty) ...[
-                            _buildStatusChartSection(),
+        // ✅ إضافة SafeArea هنا لحماية المحتوى من أزرار الهاتف
+        body: SafeArea(
+          child: Column(
+            children: [
+              _buildFilterTabs(),
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator(color: kPrimaryColor))
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            _buildTotalCard(),
                             const SizedBox(height: 20),
-                            _buildStatusTable(),
-                          ] else
-                            _buildNoDataState(),
-                        ],
+                            if (salesByStatus.isNotEmpty) ...[
+                              _buildStatusChartSection(),
+                              const SizedBox(height: 20),
+                              _buildStatusTable(),
+                            ] else
+                              _buildNoDataState(),
+                          ],
+                        ),
                       ),
-                    ),
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -243,7 +250,9 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
           color: isSelected ? kPrimaryColor : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
         ),
-        child: Text(title, style: TextStyle(color: isSelected ? Colors.white : Colors.grey, fontWeight: FontWeight.bold)),
+        child: Text(title,
+            style: TextStyle(
+                color: isSelected ? Colors.white : Colors.grey, fontWeight: FontWeight.bold)),
       ),
     );
   }
@@ -276,7 +285,8 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
       child: Column(
         children: [
-          const Text('توزيع الحالات', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const Text('توزيع الحالات',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 20),
           SizedBox(
             height: 180,
@@ -286,7 +296,8 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
                   return PieChartSectionData(
                     value: entry.value,
                     title: '${((entry.value / totalSales) * 100).toStringAsFixed(0)}%',
-                    titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                    titleStyle: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                     color: _getStatusColor(entry.key),
                     radius: 55,
                   );
@@ -316,7 +327,8 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
           return DataRow(cells: [
             DataCell(Text(entry.key, style: const TextStyle(fontSize: 12))),
             DataCell(Text(ordersCountByStatus[entry.key].toString())),
-            DataCell(Text('${entry.value.toStringAsFixed(0)} ج.م', style: const TextStyle(fontWeight: FontWeight.bold))),
+            DataCell(Text('${entry.value.toStringAsFixed(0)} ج.م',
+                style: const TextStyle(fontWeight: FontWeight.bold))),
           ]);
         }).toList(),
       ),
@@ -338,10 +350,14 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
 
   Color _getStatusColor(String status) {
     switch (status) {
-      case 'delivered': return Colors.green;
-      case 'cancelled': return Colors.red;
-      case 'processing': return Colors.orange;
-      default: return Colors.blue;
+      case 'delivered':
+        return Colors.green;
+      case 'cancelled':
+        return Colors.red;
+      case 'processing':
+        return Colors.orange;
+      default:
+        return Colors.blue;
     }
   }
 }
