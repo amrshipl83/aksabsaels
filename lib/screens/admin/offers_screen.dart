@@ -60,7 +60,6 @@ class _OffersScreenState extends State<OffersScreen> {
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-        // فلترة زمنية صارمة لضمان دقة المعلومة للمندوب
         var docs = snapshot.data!.docs.where((doc) {
           var d = doc.data() as Map<String, dynamic>;
           DateTime now = DateTime.now();
@@ -69,7 +68,6 @@ class _OffersScreenState extends State<OffersScreen> {
           return true;
         }).toList();
 
-        // الترتيب حسب الأولوية برمجياً لضمان عدم اختفاء أي قاعدة
         docs.sort((a, b) {
           var aPrio = (a.data() as Map)['priority'] ?? 0;
           var bPrio = (b.data() as Map)['priority'] ?? 0;
@@ -87,12 +85,10 @@ class _OffersScreenState extends State<OffersScreen> {
     );
   }
 
-  // --- كارت الكاش باك (النسخة الصارمة) ---
   Widget _buildCashbackCard(DocumentSnapshot doc) {
     var data = doc.data() as Map<String, dynamic>;
     bool hasTarget = data['targetType'] != 'none' && data['targetType'] != null;
     
-    // معالجة القيمة لتكون واضحة وكبيرة جداً للمندوب
     double val = (data['value'] ?? 0).toDouble();
     String valueText = data['type'] == 'percentage' 
         ? (val < 1 ? "${(val * 100).toInt()}%" : "${val.toInt()}%")
@@ -107,7 +103,6 @@ class _OffersScreenState extends State<OffersScreen> {
       ),
       child: Column(
         children: [
-          // رأس الكارت: يوضح نوع العرض والقيمة بخط كبير جداً
           Container(
             padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 1.5.h),
             decoration: BoxDecoration(
@@ -123,13 +118,12 @@ class _OffersScreenState extends State<OffersScreen> {
                     style: TextStyle(
                         color: hasTarget ? kTargetColor : kPrimaryColor,
                         fontWeight: FontWeight.w900,
-                        fontSize: 22.sp)), // خط كبير للقيمة > 18
+                        fontSize: 22.sp)),
               ],
             ),
           ),
           ListTile(
             contentPadding: EdgeInsets.all(5.w),
-            // استخدام اللوجو المدمج في القاعدة مباشرة
             leading: _buildMerchantLogo(data['sellerLogo']),
             title: Text(data['description'] ?? '',
                 style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18.sp, color: kSidebarColor)),
@@ -151,7 +145,6 @@ class _OffersScreenState extends State<OffersScreen> {
     );
   }
 
-  // --- تبويب الهدايا العينية ---
   Widget _buildGiftsTab() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -230,7 +223,6 @@ class _OffersScreenState extends State<OffersScreen> {
     );
   }
 
-  // --- دوال المساعدة البصرية ---
   Widget _buildMerchantLogo(String? url) {
     return Container(
       width: 16.w,
@@ -267,7 +259,7 @@ class _OffersScreenState extends State<OffersScreen> {
           Expanded(
               child: Text(text,
                   style: TextStyle(
-                      fontSize: 15.sp, // خط واضح جداً للمندوب
+                      fontSize: 15.sp,
                       color: isBold ? Colors.black : kSidebarColor,
                       fontWeight: isBold ? FontWeight.w900 : FontWeight.w700))),
         ],
@@ -277,4 +269,27 @@ class _OffersScreenState extends State<OffersScreen> {
 
   Widget _badge(String text, Color color) {
     return Container(
+      padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 0.8.h),
+      decoration: BoxDecoration(
+          color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+      child: Text(text,
+          style: TextStyle(color: color, fontSize: 13.sp, fontWeight: FontWeight.w900)),
+    );
+  }
+
+  String _getTriggerText(Map trigger) {
+    if (trigger['type'] == 'min_order') return "طلب بـ ${trigger['value']} ج.م";
+    return "شراء ${trigger['triggerQuantityBase']} من ${trigger['productName']}";
+  }
+
+  String _formatTS(dynamic ts) =>
+      ts != null ? DateFormat('yyyy/MM/dd').format(ts.toDate()) : "مفتوح";
+
+  Widget _buildEmptyState(String msg) => Center(
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.layers_clear_outlined, size: 60.sp, color: Colors.grey.shade300),
+        SizedBox(height: 2.h),
+        Text(msg, style: TextStyle(color: Colors.grey, fontSize: 16.sp, fontWeight: FontWeight.bold))
+      ]));
+}
 
