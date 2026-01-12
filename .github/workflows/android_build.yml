@@ -1,63 +1,58 @@
-name: Build Flutter Release
+name: Build Flutter APK & AAB (Release)
 
 on:
   push:
     branches:
       - main
       - master
+  workflow_dispatch:
 
 jobs:
-  build_release:
+  build:
     runs-on: ubuntu-latest
-    env:
-      STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-      KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
 
     steps:
-      # 1️⃣ Checkout code
-      - name: Checkout repository
+      # 1️⃣ Checkout الكود
+      - name: 🧩 Checkout Code
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup Java 17
-      - name: Setup Java
+      # 2️⃣ Setup Java (Flutter يحتاج Java 17)
+      - name: ☕️ Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
       # 3️⃣ Setup Flutter
-      - name: Setup Flutter
+      - name: 🔧 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
 
       # 4️⃣ Install dependencies
-      - name: Install Flutter dependencies
+      - name: 📦 Install Dependencies
         run: flutter pub get
 
-      # 5️⃣ Decode keystore from secret
-      - name: Decode Keystore
+      # 5️⃣ Decode release keystore من secret
+      - name: 🔑 Decode release.keystore from base64
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
         run: |
-          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > android/release.keystore
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > android/release.keystore
 
-      # 6️⃣ Build APK (release)
-      - name: Build Release APK
-        run: flutter build apk --release \
-          --flavor production \
-          --dart-define=FLAVOR=production
+      # 6️⃣ Build Release APK
+      - name: 🏗️ Build Release APK
+        run: flutter build apk --release
 
-      # 7️⃣ Build AAB (release)
-      - name: Build Release App Bundle
-        run: flutter build appbundle --release \
-          --flavor production \
-          --dart-define=FLAVOR=production
+      # 7️⃣ Build Release AAB (App Bundle)
+      - name: 📦 Build Release AAB
+        run: flutter build appbundle --release
 
-      # 8️⃣ Upload artifacts (APK + AAB)
-      - name: Upload Artifacts
+      # 8️⃣ Upload Artifacts (APK & AAB)
+      - name: 📤 Upload Release Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-builds
+          name: release-artifacts
           path: |
             build/app/outputs/flutter-apk/app-release.apk
             build/app/outputs/bundle/release/app-release.aab
