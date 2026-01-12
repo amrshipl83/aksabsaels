@@ -1,36 +1,63 @@
-name: Build Flutter APK                              
+name: Build Flutter Release
+
 on:
   push:
     branches:
       - main
-      - master                                       
+      - master
+
 jobs:
-  build:
+  build_release:
     runs-on: ubuntu-latest
+    env:
+      STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+
     steps:
-      - name: 🧩 Checkout Code
+      # 1️⃣ Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ☕️ إضافة الجافا ضرورية لأن مشروعك يستخدم Java 17
-      - name: ☕️ Setup Java
+      # 2️⃣ Setup Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: 🔧 Setup Flutter
+      # 3️⃣ Setup Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
 
-      - name: 📦 Install Dependencies
+      # 4️⃣ Install dependencies
+      - name: Install Flutter dependencies
         run: flutter pub get
 
-      - name: 🏗️ Build Release APK
-        run: flutter build apk --release             
+      # 5️⃣ Decode keystore from secret
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > android/release.keystore
 
-      - name: 📤 Upload Release APK
+      # 6️⃣ Build APK (release)
+      - name: Build Release APK
+        run: flutter build apk --release \
+          --flavor production \
+          --dart-define=FLAVOR=production
+
+      # 7️⃣ Build AAB (release)
+      - name: Build Release App Bundle
+        run: flutter build appbundle --release \
+          --flavor production \
+          --dart-define=FLAVOR=production
+
+      # 8️⃣ Upload artifacts (APK + AAB)
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: app-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: release-builds
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
