@@ -3,10 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:geolocator/geolocator.dart'; 
-import 'package:permission_handler/permission_handler.dart'; 
+import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart' as ph;
 import 'dart:convert';
-
 import 'sales_rep_dashboard.dart';
 import 'visit_screen.dart';
 import 'goals_screen.dart';
@@ -18,9 +17,9 @@ import '../admin/offers_screen.dart';
 
 // --- الثوابت اللونية لهوية أكسب مبيعات ---
 const Color kPrimaryColor = Color(0xFFB21F2D); // أحمر أكسب
-const Color kSecondaryColor = Color(0xFF1A2C3D); 
-const Color kSuccessColor = Color(0xFF2E7D32); 
-const Color kErrorColor = Color(0xFFC62828);   
+const Color kSecondaryColor = Color(0xFF1A2C3D);
+const Color kSuccessColor = Color(0xFF2E7D32);
+const Color kErrorColor = Color(0xFFC62828);
 const Color kBgColor = Color(0xFFF8F9FA);
 
 class SalesRepHomeScreen extends StatefulWidget {
@@ -72,7 +71,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
       _showSnackBar("❌ يرجى تفعيل الـ GPS في هاتفك أولاً");
       return false;
     }
-
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       bool? confirm = await _showDisclosureDialog(
@@ -84,7 +82,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
         permission = await Geolocator.requestPermission();
       }
     }
-
     if (permission == LocationPermission.deniedForever) {
       _showSnackBar("❌ إذن الموقع مرفوض دائماً، يرجى تفعيله من إعدادات الجهاز");
       return false;
@@ -142,13 +139,16 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
         final docData = querySnapshot.docs[0].data();
         currentDayLogId = querySnapshot.docs[0].id;
         currentDayStartTime = (docData['startTime'] as Timestamp?)?.toDate();
-        setState(() { _isDayOpen = true; _statusMessage = 'يوم العمل مفتوح حالياً'; });
+        setState(() {
+          _isDayOpen = true;
+          _statusMessage = 'يوم العمل مفتوح حالياً';
+        });
       } else {
-        setState(() { 
-          _isDayOpen = false; 
+        setState(() {
+          _isDayOpen = false;
           currentDayLogId = null;
           currentDayStartTime = null;
-          _statusMessage = 'يرجى بدء يوم العمل'; 
+          _statusMessage = 'يرجى بدء يوم العمل';
         });
       }
     } finally {
@@ -159,7 +159,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
   Future<void> _startDay() async {
     bool hasPermission = await _handleLocationPermission();
     if (!hasPermission) return;
-
     setState(() => _isLoading = true);
     try {
       Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
@@ -182,13 +181,23 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
   }
 
   Future<void> _endDay() async {
+    bool hasPermission = await _handleLocationPermission();
+    if (!hasPermission) return;
+    
     setState(() => _isLoading = true);
     try {
+      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       await db.collection("daily_logs").doc(currentDayLogId).update({
         'endTime': FieldValue.serverTimestamp(),
         'status': "closed",
+        'endLocation': { // ✅ إضافة موقع نهاية اليوم لزيادة الدقة الرقابية
+          'lat': position.latitude,
+          'lng': position.longitude,
+        },
       });
       await _checkDayStatus();
+    } catch (e) {
+      _showSnackBar("❌ فشل تسجيل موقع الإنهاء، حاول مرة أخرى");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -286,7 +295,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     );
   }
 
-  // --- Drawer (استرجاع كافة الأيقونات من الكود الأصلي) ---
   Widget _buildMainDrawer() {
     return Drawer(
       child: Container(
@@ -299,43 +307,40 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
               accountName: Text(repData?['fullname'] ?? 'مندوب مبيعات', style: const TextStyle(fontWeight: FontWeight.bold)),
               accountEmail: Text('كود الموظف: ${repData?['repCode'] ?? '...'}'),
             ),
-            Expanded(child: ListView(children: [
+            Expanded(
+                child: ListView(children: [
               _drawerItem(Icons.dashboard_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
-              
               _drawerItem(Icons.storefront_outlined, "المتجر", false, onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (context) => const RepStoreLiteScreen()));
               }),
-              
               _drawerItem(Icons.track_changes_outlined, "الأهداف", false, onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
               }),
-
-              _drawerItem(Icons.people_outline, "قائمة عملائي", false, onTap: () { 
-                Navigator.pop(context); 
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen())); 
+              _drawerItem(Icons.people_outline, "قائمة عملائي", false, onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen()));
               }),
-
               _drawerItem(Icons.receipt_outlined, "طلباتي", false, onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (context) => const MyOrdersScreen()));
               }),
-
               _drawerItem(Icons.location_on_outlined, "بدء زيارة", false, onTap: () {
                 Navigator.pop(context);
-                if (_isDayOpen) { Navigator.push(context, MaterialPageRoute(builder: (context) => const VisitScreen())); }
-                else { _showSnackBar("❌ يرجى فتح اليوم أولاً لتسجيل الزيارات"); }
+                if (_isDayOpen) {
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const VisitScreen()));
+                } else {
+                  _showSnackBar("❌ يرجى فتح اليوم أولاً لتسجيل الزيارات");
+                }
               }),
-
               _drawerItem(Icons.local_offer_outlined, "مركز العروض والجوائز", false, onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
               }),
-
-              _drawerItem(Icons.bar_chart_outlined, "تقارير الإنجاز", false, onTap: () { 
-                Navigator.pop(context); 
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const RepReportsScreen())); 
+              _drawerItem(Icons.bar_chart_outlined, "تقارير الإنجاز", false, onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const RepReportsScreen()));
               }),
             ])),
             const Divider(color: Colors.white24),
