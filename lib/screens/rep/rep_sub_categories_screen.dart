@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
 // 🟢 إضافة استيراد صفحة المنتجات هنا
 import 'rep_products_screen.dart'; 
 
@@ -72,6 +73,7 @@ class RepSubCategoriesScreen extends StatelessWidget {
                         builder: (context) => RepProductsScreen(
                           subId: subId,
                           subName: subName,
+                          initialPosition: currentPosition,
                         ),
                       ),
                     );
