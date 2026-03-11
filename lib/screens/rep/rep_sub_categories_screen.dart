@@ -6,11 +6,13 @@ import 'rep_products_screen.dart';
 class RepSubCategoriesScreen extends StatelessWidget {
   final String mainCategoryId;
   final String mainCategoryName;
+  final Position? currentPosition;
 
   const RepSubCategoriesScreen({
     super.key,
     required this.mainCategoryId,
     required this.mainCategoryName,
+    this.currentPosition,
   });
 
   @override
