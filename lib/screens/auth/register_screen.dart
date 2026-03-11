@@ -15,13 +15,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
-  
-  String _selectedRole = 'sales_rep'; 
+
+  String _selectedRole = 'sales_rep';
   bool _isLoading = false;
   String? _message;
   bool _isSuccess = false;
 
-  // خريطة المسميات الوظيفية (تجاهلنا التحصيل برمجياً للتركيز على المبيعات)
+  // ألوان هوية أكسب الجديدة
+  final Color aksabRed = const Color(0xFFB21F2D);
+
   final Map<String, String> _roles = {
     'sales_rep': 'مندوب مبيعات',
     'sales_supervisor': 'مشرف مبيعات',
@@ -36,12 +38,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _message = null;
     });
 
-    // المنطق الذكي: تحويل رقم الهاتف لإيميل للنظام
     String phone = _phoneController.text.trim();
-    String smartEmail = "$phone@aksab.com";
+    // استخدام النطاق الجديد للفصل بين المنصات
+    String smartEmail = "$phone@aksabsales.com";
 
     try {
-      // 1. إنشاء الحساب في Firebase Auth باستخدام الإيميل المولد
+      // 1. إنشاء الحساب في Firebase Auth
       final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: smartEmail,
         password: _passwordController.text,
@@ -49,21 +51,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       final String uid = userCredential.user!.uid;
 
-      // 2. تحديد الكولكشن (المناديب في pendingReps، والمدراء في pendingManagers)
-      String collectionName = (_selectedRole == "sales_rep") 
-          ? "pendingReps" 
-          : "pendingManagers";
+      // 2. تحديد الكولكشن المناسب
+      String collectionName = (_selectedRole == "sales_rep") ? "pendingReps" : "pendingManagers";
 
       // 3. حفظ البيانات في Firestore
-      await FirebaseFirestore.instance.collection(collectionName).add({
+      await FirebaseFirestore.instance.collection(collectionName).doc(uid).set({
         'fullname': _nameController.text.trim(),
-        'email': smartEmail, // الإيميل الذكي
+        'email': smartEmail,
         'phone': phone,
         'address': _addressController.text.trim(),
         'role': _selectedRole,
         'status': "pending",
         'createdAt': FieldValue.serverTimestamp(),
         'uid': uid,
+        'appType': 'sales', // لتمييز الطلب مستقبلاً
       });
 
       setState(() {
@@ -71,20 +72,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _message = "✅ تم التسجيل بنجاح كـ ${_roles[_selectedRole]}، في انتظار موافقة الإدارة.";
       });
 
-      // العودة لصفحة الدخول بعد النجاح
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted) Navigator.pop(context);
       });
-
     } on FirebaseAuthException catch (e) {
       setState(() {
         _isSuccess = false;
         if (e.code == 'email-already-in-use') {
-          _message = "❌ رقم الهاتف هذا مسجل به حساب بالفعل.";
-        } else if (e.code == 'weak-password') {
-          _message = "❌ كلمة المرور ضعيفة جداً.";
+          _message = "❌ رقم الهاتف هذا مسجل به حساب مندوب بالفعل.";
         } else {
-          _message = "❌ خطأ: ${e.message}";
+          _message = "❌ خطأ في التسجيل: ${e.message}";
         }
       });
     } catch (e) {
@@ -100,76 +97,73 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
+      backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: const Text("تسجيل حساب جديد"),
-        backgroundColor: const Color(0xFF43B97F),
+        title: const Text("إنضم لفريق أكسب مبيعات"),
+        backgroundColor: aksabRed,
         centerTitle: true,
+        elevation: 0,
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(25),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 500),
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 15)],
-            ),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                children: [
-                  const Icon(Icons.person_add, size: 50, color: Color(0xFF43B97F)),
-                  const SizedBox(height: 20),
-                  _buildField(_nameController, "الاسم الكامل", Icons.person),
-                  _buildField(_phoneController, "رقم الهاتف (سيكون هو المعرف)", Icons.phone, isPhone: true),
-                  _buildField(_passwordController, "كلمة المرور", Icons.lock, isPass: true),
-                  _buildField(_addressController, "العنوان بالتفصيل", Icons.map),
-                  
-                  const SizedBox(height: 20),
-                  const Text("اختر نوع الحساب:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  const SizedBox(height: 10),
-                  
-                  // اختيار الدور
-                  ..._roles.entries.map((entry) {
-                    return RadioListTile<String>(
-                      title: Text(entry.value),
-                      value: entry.key,
-                      groupValue: _selectedRole,
-                      activeColor: const Color(0xFF43B97F),
-                      onChanged: (val) => setState(() => _selectedRole = val!),
-                    );
-                  }).toList(),
-
-                  if (_message != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                      child: Text(_message!, 
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: _isSuccess ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
-                    ),
-
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _register,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF43B97F),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(25),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15)],
+              ),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    Icon(Icons.person_add_rounded, size: 60, color: aksabRed),
+                    const SizedBox(height: 20),
+                    _buildField(_nameController, "الاسم بالكامل", Icons.person),
+                    _buildField(_phoneController, "رقم الهاتف", Icons.phone, isPhone: true),
+                    _buildField(_passwordController, "كلمة المرور", Icons.lock, isPass: true),
+                    _buildField(_addressController, "محل الإقامة / المنطقة", Icons.location_on),
+                    const Divider(height: 30),
+                    const Text("المسمى الوظيفي المطلوب:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 10),
+                    ..._roles.entries.map((entry) {
+                      return RadioListTile<String>(
+                        title: Text(entry.value),
+                        value: entry.key,
+                        groupValue: _selectedRole,
+                        activeColor: aksabRed,
+                        onChanged: (val) => setState(() => _selectedRole = val!),
+                      );
+                    }).toList(),
+                    if (_message != null)
+                      Padding(
                         padding: const EdgeInsets.symmetric(vertical: 15),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        child: Text(_message!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: _isSuccess ? Colors.green : aksabRed, fontWeight: FontWeight.bold)),
                       ),
-                      child: _isLoading 
-                        ? const CircularProgressIndicator(color: Colors.white) 
-                        : const Text("إنشاء الحساب", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _register,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: aksabRed,
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: _isLoading
+                            ? const CircularProgressIndicator(color: Colors.white)
+                            : const Text("إرسال طلب الانضمام", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -185,16 +179,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
         keyboardType: isPhone ? TextInputType.phone : TextInputType.text,
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: Icon(icon, color: const Color(0xFF43B97F)),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          prefixIcon: Icon(icon, color: aksabRed),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey[300]!)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey[200]!)),
           filled: true,
           fillColor: Colors.grey[50],
         ),
-        validator: (v) {
-          if (v == null || v.isEmpty) return "هذا الحقل مطلوب";
-          if (isPhone && v.length < 11) return "رقم الهاتف غير صحيح";
-          return null;
-        },
+        validator: (v) => (v == null || v.isEmpty) ? "هذا الحقل مطلوب" : null,
       ),
     );
   }

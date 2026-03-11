@@ -2,16 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; // ✅ لإرسال التوكن
-import 'package:http/http.dart' as http; // ✅ للربط مع الرابط المطلوب
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'register_screen.dart';
 
-const Color kPrimaryColor = Color(0xFF43B97F);
-const Color kSecondaryColor = Color(0xFF1A2C3D);
+// --- الهوية البصرية الجديدة لأكسب ---
+const Color kPrimaryColor = Color(0xFFB21F2D); // أحمر أكسب
+const Color kSecondaryColor = Color(0xFF1A2C3D); 
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
+
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
@@ -20,6 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
+
   String? _errorMessage;
   bool _isLoading = true;
 
@@ -29,13 +32,13 @@ class _LoginScreenState extends State<LoginScreen> {
     _checkExistingLogin();
   }
 
-  // --- وظيفة الربط مع رابط الإشعارات الجديد ---
+  // --- ربط التوكن مع الـ Backend لإرسال الإشعارات ---
   Future<void> _registerNotification(String userId, String role, String address) async {
     try {
       String? token = await FirebaseMessaging.instance.getToken();
       if (token == null) return;
 
-      final response = await http.post(
+      await http.post(
         Uri.parse('https://5uex7vzy64.execute-api.us-east-1.amazonaws.com/V2/new_nofiction'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
@@ -45,7 +48,6 @@ class _LoginScreenState extends State<LoginScreen> {
           'address': address,
         }),
       );
-      print("Notification Sync Status: ${response.statusCode}");
     } catch (e) {
       print("Notification Sync Error: $e");
     }
@@ -60,18 +62,13 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         if (userRole == 'sales_rep') {
           Navigator.of(context).pushReplacementNamed('/rep_home');
-        } else if (userRole == 'sales_supervisor' || userRole == 'sales_manager') {
+        } else {
           Navigator.of(context).pushReplacementNamed('/admin_dashboard');
         }
       }
     } else {
       setState(() => _isLoading = false);
     }
-  }
-
-  dynamic _encoder(dynamic item) {
-    if (item is Timestamp) return item.toDate().toIso8601String();
-    return item;
   }
 
   Future<void> _login() async {
@@ -82,7 +79,8 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     String input = _phoneController.text.trim();
-    String smartEmail = input.contains('@') ? input : "$input@aksab.com";
+    // ✅ التعديل الجوهري: استخدام النطاق الخاص بتطبيق المبيعات فقط
+    String smartEmail = input.contains('@') ? input : "$input@aksabsales.com";
     final password = _passwordController.text.trim();
 
     try {
@@ -90,15 +88,16 @@ class _LoginScreenState extends State<LoginScreen> {
         email: smartEmail,
         password: password,
       );
-      final user = userCredential.user;
 
+      final user = userCredential.user;
       if (user == null) throw FirebaseAuthException(code: 'user-null');
 
       DocumentSnapshot? userDocSnapshot;
       String? userRole;
 
+      // البحث في كولكشن المناديب (تأكد من مطابقة الاسم في Firestore)
       final salesRepQuery = await FirebaseFirestore.instance
-          .collection('salesRep')
+          .collection('salesReps') // تم توحيد الاسم لـ salesReps
           .where('uid', isEqualTo: user.uid)
           .limit(1)
           .get();
@@ -108,6 +107,7 @@ class _LoginScreenState extends State<LoginScreen> {
         userRole = 'sales_rep';
       }
 
+      // البحث في كولكشن المديرين إذا لم يكن مندوباً
       if (userDocSnapshot == null) {
         final managersQuery = await FirebaseFirestore.instance
             .collection('managers')
@@ -124,37 +124,31 @@ class _LoginScreenState extends State<LoginScreen> {
         final userDocData = userDocSnapshot.data() as Map<String, dynamic>;
         userDocData['docId'] = userDocSnapshot.id;
 
+        // ✅ التأكد من قبول الحساب من قبل الإدارة
         if (userDocData['status'] == 'approved') {
-          // ✅ تنفيذ عملية الربط مع الرابط الخارجي (Lambda)
-          await _registerNotification(
-            user.uid, 
-            userRole, 
-            userDocData['address'] ?? ""
-          );
+          await _registerNotification(user.uid, userRole, userDocData['address'] ?? "");
 
           final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('userData', json.encode(userDocData, toEncodable: _encoder));
+          await prefs.setString('userData', json.encode(userDocData));
           await prefs.setString('userRole', userRole);
 
           if (mounted) {
-            if (userRole == 'sales_rep') {
-              Navigator.of(context).pushReplacementNamed('/rep_home');
-            } else {
-              Navigator.of(context).pushReplacementNamed('/admin_dashboard');
-            }
+            Navigator.of(context).pushReplacementNamed(
+              userRole == 'sales_rep' ? '/rep_home' : '/admin_dashboard'
+            );
           }
         } else {
           await FirebaseAuth.instance.signOut();
-          _showError('❌ حسابك بانتظار تفعيل الإدارة.');
+          _showError('❌ حسابك بانتظار تفعيل الإدارة (Pending).');
         }
       } else {
         await FirebaseAuth.instance.signOut();
-        _showError('❌ بياناتك غير موجودة في الكشوف المعتمدة.');
+        _showError('❌ بياناتك غير موجودة في سجلات المبيعات.');
       }
     } on FirebaseAuthException {
       _showError('❌ رقم الهاتف أو كلمة المرور غير صحيحة.');
     } catch (e) {
-      _showError('❌ خطأ: ${e.toString()}');
+      _showError('❌ خطأ في النظام: ${e.toString()}');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -174,9 +168,9 @@ class _LoginScreenState extends State<LoginScreen> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFFF5F7FA), Color(0xFFC3CFE2)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+            colors: [Color(0xFFF5F7FA), Color(0xFFEDEFF2)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
           ),
         ),
         child: Center(
@@ -187,31 +181,23 @@ class _LoginScreenState extends State<LoginScreen> {
               padding: const EdgeInsets.all(30.0),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [const BoxShadow(color: Colors.black12, blurRadius: 20)],
+                borderRadius: BorderRadius.circular(25),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20)],
               ),
               child: Form(
                 key: _formKey,
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.lock_person, size: 60, color: kPrimaryColor),
+                    const Icon(Icons.stars_rounded, size: 70, color: kPrimaryColor),
                     const SizedBox(height: 10),
-                    const Text('أكسب للمبيعات', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kSecondaryColor)),
+                    const Text('أكسب للمبيعات', 
+                        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: kSecondaryColor)),
+                    const Text('منظومة المندوب الذكي', 
+                        style: TextStyle(fontSize: 14, color: Colors.grey)),
                     const SizedBox(height: 30),
-                    _buildTextFormField(
-                      controller: _phoneController,
-                      label: 'رقم الهاتف',
-                      icon: Icons.phone_android,
-                      keyboardType: TextInputType.phone,
-                    ),
+                    _buildField(_phoneController, 'رقم الهاتف', Icons.phone_android, isPhone: true),
                     const SizedBox(height: 20),
-                    _buildTextFormField(
-                      controller: _passwordController,
-                      label: 'كلمة المرور',
-                      icon: Icons.lock_outline,
-                      isPassword: true,
-                    ),
+                    _buildField(_passwordController, 'كلمة المرور', Icons.lock_outline, isPass: true),
                     const SizedBox(height: 30),
                     SizedBox(
                       width: double.infinity,
@@ -219,25 +205,23 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: _isLoading ? null : _login,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: kPrimaryColor,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                         ),
                         child: _isLoading
                             ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text('دخول', style: TextStyle(fontSize: 18, color: Colors.white)),
+                            : const Text('دخول للفريق', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
                       ),
                     ),
                     if (_errorMessage != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 15),
-                        child: Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+                        child: Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w500)),
                       ),
                     const SizedBox(height: 20),
                     TextButton(
-                      onPressed: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen()));
-                      },
-                      child: const Text('ليس لديك حساب؟ سجل الآن', style: TextStyle(color: kPrimaryColor, fontWeight: FontWeight.bold)),
+                      onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen())),
+                      child: const Text('طلب انضمام لفريق المبيعات', style: TextStyle(color: kPrimaryColor, fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -249,16 +233,18 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildTextFormField({required TextEditingController controller, required String label, required IconData icon, TextInputType keyboardType = TextInputType.text, bool isPassword = false}) {
+  Widget _buildField(TextEditingController controller, String label, IconData icon, {bool isPass = false, bool isPhone = false}) {
     return TextFormField(
       controller: controller,
-      keyboardType: keyboardType,
-      obscureText: isPassword,
+      obscureText: isPass,
       textAlign: TextAlign.right,
+      keyboardType: isPhone ? TextInputType.phone : TextInputType.text,
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon, color: kPrimaryColor),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
+        filled: true,
+        fillColor: Colors.grey[50],
       ),
       validator: (v) => (v == null || v.isEmpty) ? 'مطلوب' : null,
     );
