@@ -124,12 +124,6 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
     return total;
   }
 
-  int _calculateTotalQty() {
-    int count = 0;
-    _demoCart.forEach((key, value) => count += (value['qty'] as int));
-    return count;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -188,7 +182,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
           itemCount: snapshot.data!.docs.length,
           itemBuilder: (context, index) {
             var product = snapshot.data!.docs[index];
-            return _buildProductOffers(product.id, product['name'], product['imageUrls']?[0]);
+            return _buildProductOffers(product.id, product['name'], (product.data() as Map<String, dynamic>).containsKey('imageUrls') ? product['imageUrls']?[0] : null);
           },
         );
       },
@@ -226,7 +220,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
             leading: ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: imageUrl != null
-                  ? Image.network(imageUrl, width: 45, height: 45, fit: BoxShape.cover == BoxFit.cover ? BoxFit.cover : BoxFit.cover)
+                  ? Image.network(imageUrl, width: 45, height: 45, fit: BoxFit.cover) // ✅ تم تصحيح السطر هنا
                   : const Icon(Icons.shopping_bag, color: Colors.grey),
             ),
             title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),

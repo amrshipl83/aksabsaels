@@ -19,9 +19,8 @@ class _VisitScreenState extends State<VisitScreen> {
   String? _currentVisitId;
   String? _currentCustomerName;
   Map<String, dynamic>? _userData;
-
   List<DocumentSnapshot> _customers = [];
-  List<DocumentSnapshot> _filteredCustomers = []; // للقائمة المفلترة والبحث
+  List<DocumentSnapshot> _filteredCustomers = [];
   String? _selectedCustomerId;
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
@@ -33,7 +32,6 @@ class _VisitScreenState extends State<VisitScreen> {
     _checkInitialStatus();
   }
 
-  // 1. فحص الحالة وطلب الإذن مع الإفصاح
   Future<void> _checkInitialStatus() async {
     final prefs = await SharedPreferences.getInstance();
     final userDataString = prefs.getString('userData');
@@ -42,11 +40,10 @@ class _VisitScreenState extends State<VisitScreen> {
       _showErrorPage("يجب تسجيل الدخول أولاً");
       return;
     }
-
     _userData = jsonDecode(userDataString);
     final repCode = _userData!['repCode'];
 
-    // فحص يوم العمل (Log)
+    // 1. فحص يوم العمل (Log)
     final logQuery = await FirebaseFirestore.instance
         .collection('daily_logs')
         .where('repCode', isEqualTo: repCode)
@@ -59,6 +56,46 @@ class _VisitScreenState extends State<VisitScreen> {
       return;
     }
 
+    // 2. فحص العلامة الذكية في مستند المندوب (salesRep)
+    // نبحث عن المستند باستخدام repCode
+    final repQuery = await FirebaseFirestore.instance
+        .collection('salesRep')
+        .where('repCode', isEqualTo: repCode)
+        .limit(1)
+        .get();
+
+    if (repQuery.docs.isNotEmpty) {
+      final repData = repQuery.docs.first.data();
+      bool hasActiveVisit = repData['hasActiveVisit'] ?? false;
+
+      if (hasActiveVisit) {
+        // 3. طالما العلامة موجودة، نبحث عن الزيارة المفتوحة في كولكشن visits
+        final visitQuery = await FirebaseFirestore.instance
+            .collection('visits')
+            .where('repCode', isEqualTo: repCode)
+            .where('status', isEqualTo: 'in_progress')
+            .limit(1)
+            .get();
+
+        if (visitQuery.docs.isNotEmpty) {
+          final visitDoc = visitQuery.docs.first;
+          _currentVisitId = visitDoc.id;
+          _currentCustomerName = visitDoc['customerName'];
+
+          // تحديث اللوكل لضمان السرعة
+          await prefs.setString('currentVisitId', _currentVisitId!);
+          await prefs.setString('currentCustomerName', _currentCustomerName!);
+
+          setState(() {
+            _isVisiting = true;
+            _isLoading = false;
+          });
+          return; // تم استعادة الزيارة بنجاح
+        }
+      }
+    }
+
+    // 4. المسار الطبيعي في حال عدم وجود زيارة معلقة
     _currentVisitId = prefs.getString('currentVisitId');
     _currentCustomerName = prefs.getString('currentCustomerName');
 
@@ -68,19 +105,16 @@ class _VisitScreenState extends State<VisitScreen> {
         _isLoading = false;
       });
     } else {
-      // إظهار رسالة الإفصاح قبل جلب العملاء لترتيبهم
       _showLocationDisclosure(repCode);
     }
   }
 
-  // رسالة إفصاح جوجل (Prominent Disclosure)
   void _showLocationDisclosure(String repCode) async {
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
       _loadCustomers(repCode);
       return;
     }
-
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -111,11 +145,9 @@ class _VisitScreenState extends State<VisitScreen> {
     );
   }
 
-  // تحميل العملاء مع الترتيب الجغرافي
   Future<void> _loadCustomers(String repCode) async {
     setState(() => _isLoading = true);
     try {
-      // طلب الإذن الرسمي
       LocationPermission permission = await Geolocator.requestPermission();
       Position? currentPos;
       if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
@@ -130,7 +162,6 @@ class _VisitScreenState extends State<VisitScreen> {
 
       List<DocumentSnapshot> tempCustomers = snap.docs;
 
-      // الترتيب الجغرافي (Geo-Sorting)
       if (currentPos != null) {
         tempCustomers.sort((a, b) {
           try {
@@ -140,7 +171,9 @@ class _VisitScreenState extends State<VisitScreen> {
             double distA = Geolocator.distanceBetween(currentPos!.latitude, currentPos!.longitude, locA['lat'], locA['lng']);
             double distB = Geolocator.distanceBetween(currentPos!.latitude, currentPos!.longitude, locB['lat'], locB['lng']);
             return distA.compareTo(distB);
-          } catch (e) { return 0; }
+          } catch (e) {
+            return 0;
+          }
         });
       }
 
@@ -168,57 +201,89 @@ class _VisitScreenState extends State<VisitScreen> {
   Future<void> _startVisit() async {
     if (_selectedCustomerId == null) return;
     setState(() => _isLoading = true);
+    try {
+      Position? position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      final customer = _customers.firstWhere((doc) => doc.id == _selectedCustomerId);
+      final customerName = customer['fullname'];
 
-    Position? position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-    final customer = _customers.firstWhere((doc) => doc.id == _selectedCustomerId);
-    final customerName = customer['fullname'];
+      final visitData = {
+        'repCode': _userData!['repCode'],
+        'repName': _userData!['fullname'],
+        'customerId': _selectedCustomerId,
+        'customerName': customerName,
+        'startTime': FieldValue.serverTimestamp(),
+        'status': "in_progress",
+        'location': position != null ? {'lat': position.latitude, 'lng': position.longitude} : null,
+      };
 
-    final visitData = {
-      'repCode': _userData!['repCode'],
-      'repName': _userData!['fullname'],
-      'customerId': _selectedCustomerId,
-      'customerName': customerName,
-      'startTime': FieldValue.serverTimestamp(),
-      'status': "in_progress",
-      'location': position != null ? {'lat': position.latitude, 'lng': position.longitude} : null,
-    };
+      // 1. إضافة الزيارة
+      final docRef = await FirebaseFirestore.instance.collection('visits').add(visitData);
 
-    final docRef = await FirebaseFirestore.instance.collection('visits').add(visitData);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('currentVisitId', docRef.id);
-    await prefs.setString('currentCustomerName', customerName);
+      // 2. 🟢 تفعيل العلامة الذكية في مستند المندوب
+      final repQuery = await FirebaseFirestore.instance
+          .collection('salesRep')
+          .where('repCode', isEqualTo: _userData!['repCode'])
+          .limit(1)
+          .get();
+      if (repQuery.docs.isNotEmpty) {
+        await repQuery.docs.first.reference.update({'hasActiveVisit': true});
+      }
 
-    setState(() {
-      _currentVisitId = docRef.id;
-      _currentCustomerName = customerName;
-      _isVisiting = true;
-      _isLoading = false;
-    });
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('currentVisitId', docRef.id);
+      await prefs.setString('currentCustomerName', customerName);
+
+      setState(() {
+        _currentVisitId = docRef.id;
+        _currentCustomerName = customerName;
+        _isVisiting = true;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint("Start Visit Error: $e");
+      setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _endVisit() async {
     if (_visitStatus == null) return;
     setState(() => _isLoading = true);
 
-    await FirebaseFirestore.instance.collection('visits').doc(_currentVisitId).update({
-      'status': _visitStatus,
-      'notes': _notesController.text,
-      'endTime': FieldValue.serverTimestamp(),
-    });
+    try {
+      // 1. تحديث الزيارة
+      await FirebaseFirestore.instance.collection('visits').doc(_currentVisitId).update({
+        'status': _visitStatus,
+        'notes': _notesController.text,
+        'endTime': FieldValue.serverTimestamp(),
+      });
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('currentVisitId');
-    await prefs.remove('currentCustomerName');
+      // 2. 🟢 إزالة العلامة الذكية من مستند المندوب
+      final repQuery = await FirebaseFirestore.instance
+          .collection('salesRep')
+          .where('repCode', isEqualTo: _userData!['repCode'])
+          .limit(1)
+          .get();
+      if (repQuery.docs.isNotEmpty) {
+        await repQuery.docs.first.reference.update({'hasActiveVisit': false});
+      }
 
-    setState(() {
-      _isVisiting = false;
-      _currentVisitId = null;
-      _currentCustomerName = null;
-      _visitStatus = null;
-      _notesController.clear();
-      _isLoading = false;
-    });
-    _loadCustomers(_userData!['repCode']);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('currentVisitId');
+      await prefs.remove('currentCustomerName');
+
+      setState(() {
+        _isVisiting = false;
+        _currentVisitId = null;
+        _currentCustomerName = null;
+        _visitStatus = null;
+        _notesController.clear();
+        _isLoading = false;
+      });
+      _loadCustomers(_userData!['repCode']);
+    } catch (e) {
+      debugPrint("End Visit Error: $e");
+      setState(() => _isLoading = false);
+    }
   }
 
   void _showErrorPage(String msg) {
@@ -269,24 +334,24 @@ class _VisitScreenState extends State<VisitScreen> {
             border: Border.all(color: Colors.grey.shade200),
           ),
           child: _filteredCustomers.isEmpty
-            ? const Center(child: Text("لا يوجد عملاء متاحين"))
-            : ListView.builder(
-                itemCount: _filteredCustomers.length,
-                itemBuilder: (context, index) {
-                  var doc = _filteredCustomers[index];
-                  bool isSelected = _selectedCustomerId == doc.id;
-                  return ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: isSelected ? const Color(0xFF43B97F) : Colors.grey[100],
-                      child: Icon(Icons.store, color: isSelected ? Colors.white : Colors.grey),
-                    ),
-                    title: Text(doc['fullname'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text(doc['phone']),
-                    onTap: () => setState(() => _selectedCustomerId = doc.id),
-                    trailing: isSelected ? const Icon(Icons.check_circle, color: Color(0xFF43B97F)) : null,
-                  );
-                },
-              ),
+              ? const Center(child: Text("لا يوجد عملاء متاحين"))
+              : ListView.builder(
+                  itemCount: _filteredCustomers.length,
+                  itemBuilder: (context, index) {
+                    var doc = _filteredCustomers[index];
+                    bool isSelected = _selectedCustomerId == doc.id;
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: isSelected ? const Color(0xFF43B97F) : Colors.grey[100],
+                        child: Icon(Icons.store, color: isSelected ? Colors.white : Colors.grey),
+                      ),
+                      title: Text(doc['fullname'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text(doc['phone']),
+                      onTap: () => setState(() => _selectedCustomerId = doc.id),
+                      trailing: isSelected ? const Icon(Icons.check_circle, color: Color(0xFF43B97F)) : null,
+                    );
+                  },
+                ),
         ),
         const SizedBox(height: 20),
         ElevatedButton(
@@ -301,20 +366,18 @@ class _VisitScreenState extends State<VisitScreen> {
         const SizedBox(height: 15),
         OutlinedButton.icon(
           onPressed: () {
-            // ✅ تم دمج الحل الأول: التحديث التلقائي عند العودة من شاشة التسجيل
             Navigator.push(
-              context, 
+              context,
               MaterialPageRoute(builder: (context) => const AddNewCustomerScreen())
             ).then((_) {
               if (_userData != null) {
-                // إعادة تحميل العملاء لضمان ظهور العميل الجديد فوراً
                 _loadCustomers(_userData!['repCode']);
               }
             });
           },
           icon: const Icon(Icons.person_add),
           label: const Text("تسجيل عميل جديد"),
-          style: OutlinedButton.styleFrom(
+          style: OutlinedButton.iconStyleFrom(
             minimumSize: const Size(double.infinity, 50),
             side: const BorderSide(color: Colors.blue),
             foregroundColor: Colors.blue,
@@ -334,7 +397,8 @@ class _VisitScreenState extends State<VisitScreen> {
             children: [
               const Icon(Icons.timer, color: Colors.green),
               const SizedBox(width: 10),
-              Text("زيارة نشطة لـ: $_currentCustomerName", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+              Text("زيارة نشطة لـ: $_currentCustomerName",
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
             ],
           ),
         ),
