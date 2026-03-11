@@ -16,7 +16,7 @@ jobs:
       - name: 🧩 Checkout Code
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup Java
+      # 2️⃣ Setup Java (تم اختيار Zulu 17 لتوافقها العالي مع أندرويد)
       - name: ☕️ Setup Java
         uses: actions/setup-java@v4
         with:
@@ -33,26 +33,29 @@ jobs:
       - name: 📦 Install Dependencies
         run: flutter pub get
 
-      # 5️⃣ Decode release keystore من secret
-      - name: 🔑 Decode release.keystore from base64
+      # 5️⃣ فك تشفير المفتاح وإنشاء ملف الخصائص
+      # ملاحظة: تأكد من تسمية السيكرت في GitHub بـ RELEASE_KEYSTORE_BASE64
+      - name: 🔑 Setup Code Signing
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          if [ -z "$RELEASE_KEYSTORE_BASE64" ]; then
-            echo "Warning: RELEASE_KEYSTORE_BASE64 is empty. Build might fail if signing is required."
-          else
-            echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > android/release.keystore
-          fi
+          # فك تشفير ملف الـ JKS ووضعه في مساره الصحيح
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > android/app/aksabsales.jks
+          
+          # إنشاء ملف key.properties اللي الـ Gradle بيدور عليه
+          echo "storePassword=$STORE_PASSWORD" > android/key.properties
+          echo "keyPassword=$KEY_PASSWORD" >> android/key.properties
+          echo "keyAlias=$KEY_ALIAS" >> android/key.properties
+          echo "storeFile=aksabsales.jks" >> android/key.properties
 
       # 6️⃣ Build Release APK
       - name: 🏗️ Build Release APK
         run: flutter build apk --release
 
-      # 7️⃣ تم إيقاف الـ AAB مؤقتاً لتسريع الـ Build
-      # - name: 📦 Build Release AAB
-      #   run: flutter build appbundle --release
-
-      # 8️⃣ Upload Artifacts (APK Only)
+      # 7️⃣ Upload Artifacts (APK Only)
       - name: 📤 Upload Release Artifacts
         uses: actions/upload-artifact@v4
         with:
