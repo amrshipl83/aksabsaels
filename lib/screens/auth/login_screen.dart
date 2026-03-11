@@ -8,7 +8,7 @@ import 'dart:convert';
 import 'register_screen.dart';
 
 // --- الهوية البصرية الجديدة لأكسب ---
-const Color kPrimaryColor = Color(0xFFB21F2D); // أحمر أكسب
+const Color kPrimaryColor = Color(0xFFB21F2D); // أحمر أكسب المعتمد
 const Color kSecondaryColor = Color(0xFF1A2C3D); 
 
 class LoginScreen extends StatefulWidget {
@@ -32,7 +32,12 @@ class _LoginScreenState extends State<LoginScreen> {
     _checkExistingLogin();
   }
 
-  // --- ربط التوكن مع الـ Backend لإرسال الإشعارات ---
+  // ✅ دالة التعامل مع الـ Timestamp أثناء تحويل البيانات لـ JSON (من الكود الأصلي)
+  dynamic _encoder(dynamic item) {
+    if (item is Timestamp) return item.toDate().toIso8601String();
+    return item;
+  }
+
   Future<void> _registerNotification(String userId, String role, String address) async {
     try {
       String? token = await FirebaseMessaging.instance.getToken();
@@ -49,7 +54,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }),
       );
     } catch (e) {
-      print("Notification Sync Error: $e");
+      debugPrint("Notification Sync Error: $e");
     }
   }
 
@@ -79,7 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     String input = _phoneController.text.trim();
-    // ✅ التعديل الجوهري: استخدام النطاق الخاص بتطبيق المبيعات فقط
+    // ✅ النطاق الجديد حصرياً
     String smartEmail = input.contains('@') ? input : "$input@aksabsales.com";
     final password = _passwordController.text.trim();
 
@@ -95,9 +100,9 @@ class _LoginScreenState extends State<LoginScreen> {
       DocumentSnapshot? userDocSnapshot;
       String? userRole;
 
-      // البحث في كولكشن المناديب (تأكد من مطابقة الاسم في Firestore)
+      // ✅ البحث في كولكشن salesRep (المفرد) بناءً على الـ Firestore
       final salesRepQuery = await FirebaseFirestore.instance
-          .collection('salesRep') // تم توحيد الاسم لـ salesReps
+          .collection('salesRep') 
           .where('uid', isEqualTo: user.uid)
           .limit(1)
           .get();
@@ -107,7 +112,6 @@ class _LoginScreenState extends State<LoginScreen> {
         userRole = 'sales_rep';
       }
 
-      // البحث في كولكشن المديرين إذا لم يكن مندوباً
       if (userDocSnapshot == null) {
         final managersQuery = await FirebaseFirestore.instance
             .collection('managers')
@@ -124,12 +128,12 @@ class _LoginScreenState extends State<LoginScreen> {
         final userDocData = userDocSnapshot.data() as Map<String, dynamic>;
         userDocData['docId'] = userDocSnapshot.id;
 
-        // ✅ التأكد من قبول الحساب من قبل الإدارة
         if (userDocData['status'] == 'approved') {
           await _registerNotification(user.uid, userRole, userDocData['address'] ?? "");
 
           final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('userData', json.encode(userDocData));
+          // ✅ التخزين باستخدام الـ encoder لضمان عدم حدوث خطأ في الـ Timestamps
+          await prefs.setString('userData', json.encode(userDocData, toEncodable: _encoder));
           await prefs.setString('userRole', userRole);
 
           if (mounted) {
@@ -139,11 +143,11 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         } else {
           await FirebaseAuth.instance.signOut();
-          _showError('❌ حسابك بانتظار تفعيل الإدارة (Pending).');
+          _showError('❌ حسابك بانتظار تفعيل الإدارة.');
         }
       } else {
         await FirebaseAuth.instance.signOut();
-        _showError('❌ بياناتك غير موجودة في سجلات المبيعات.');
+        _showError('❌ بياناتك غير موجودة في سجلات مبيعات أكسب.');
       }
     } on FirebaseAuthException {
       _showError('❌ رقم الهاتف أو كلمة المرور غير صحيحة.');
@@ -250,4 +254,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-
