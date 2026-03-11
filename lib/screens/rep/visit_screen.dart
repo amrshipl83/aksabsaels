@@ -377,7 +377,7 @@ class _VisitScreenState extends State<VisitScreen> {
           },
           icon: const Icon(Icons.person_add),
           label: const Text("تسجيل عميل جديد"),
-          style: OutlinedButton.StyleFrom(
+          style: OutlinedButton.styleFrom(
             minimumSize: const Size(double.infinity, 50),
             side: const BorderSide(color: Colors.blue),
             foregroundColor: Colors.blue,
