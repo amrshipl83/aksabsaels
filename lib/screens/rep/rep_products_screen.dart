@@ -168,26 +168,38 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
   }
 
   Widget _buildProductsList() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _db.collection('products')
-          .where('subId', isEqualTo: widget.subId)
-          .where('status', isEqualTo: 'active')
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-        if (snapshot.data!.docs.isEmpty) return const Center(child: Text("لا توجد منتجات حالياً في هذا القسم"));
+  return StreamBuilder<QuerySnapshot>(
+    stream: _db.collection('products')
+        .where('subId', isEqualTo: widget.subId)
+        .where('status', isEqualTo: 'active')
+        .snapshots(),
+    builder: (context, snapshot) {
+      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+      if (snapshot.data!.docs.isEmpty) return const Center(child: Text("لا توجد منتجات حالياً في هذا القسم"));
 
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
-          itemCount: snapshot.data!.docs.length,
-          itemBuilder: (context, index) {
-            var product = snapshot.data!.docs[index];
-            return _buildProductOffers(product.id, product['name'], (product.data() as Map<String, dynamic>).containsKey('imageUrls') ? product['imageUrls']?[0] : null);
-          },
-        );
-      },
-    );
-  }
+      return ListView.builder(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
+        itemCount: snapshot.data!.docs.length,
+        itemBuilder: (context, index) {
+          var productDoc = snapshot.data!.docs[index];
+          var productData = productDoc.data() as Map<String, dynamic>; // 👈 تعريف الداتا بوضوح
+          
+          String? imageUrl;
+          if (productData.containsKey('imageUrls') && productData['imageUrls'] != null && (productData['imageUrls'] as List).isNotEmpty) {
+            imageUrl = productData['imageUrls'][0];
+          }
+
+          return _buildProductOffers(
+            productDoc.id, 
+            productData['name'] ?? '', 
+            imageUrl
+          );
+        },
+      );
+    },
+  );
+}
+
 
   Widget _buildProductOffers(String productId, String name, String? imageUrl) {
     return FutureBuilder<QuerySnapshot>(
