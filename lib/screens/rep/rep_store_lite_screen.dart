@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-// استيراد الصفحة الجديدة للربط
-import 'rep_sub_categories_screen.dart'; 
+import 'rep_sub_categories_screen.dart';
+// 1. استيراد صفحة التجار الجديدة
+import 'RepTradersLiteScreen.dart'; 
 
 class RepStoreLiteScreen extends StatefulWidget {
   const RepStoreLiteScreen({super.key});
@@ -10,15 +11,9 @@ class RepStoreLiteScreen extends StatefulWidget {
   State<RepStoreLiteScreen> createState() => _RepStoreLiteScreenState();
 }
 
-class _RepStoreLiteScreenState extends State<RepStoreLiteScreen> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+// قمنا بإزالة SingleTickerProviderStateMixin لعدم الحاجة للـ TabController
+class _RepStoreLiteScreenState extends State<RepStoreLiteScreen> {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,29 +22,39 @@ class _RepStoreLiteScreenState extends State<RepStoreLiteScreen> with SingleTick
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F7FA),
         appBar: AppBar(
-          title: const Text("متجر أكسب", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          title: const Text("متجر أكسب - الأقسام", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           backgroundColor: Colors.white,
           foregroundColor: const Color(0xFF2c3e50),
           elevation: 0.5,
-          bottom: TabBar(
-            controller: _tabController,
-            labelColor: const Color(0xFF4CAF50),
-            unselectedLabelColor: Colors.grey,
-            indicatorColor: const Color(0xFF4CAF50),
-            tabs: const [
-              Tab(icon: Icon(Icons.grid_view_rounded), text: "الأقسام الرئيسية"),
-              Tab(icon: Icon(Icons.storefront_rounded), text: "التجار"),
-            ],
-          ),
-        ),
-        body: TabBarView(
-          controller: _tabController,
-          children: [
-            _buildMainCategoriesGrid(),
-            _buildTradersList(),
+          centerTitle: true,
+          // أضفنا أيقونة سريعة في الـ AppBar كخيار إضافي
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.storefront_rounded, color: Color(0xFF4CAF50)),
+              onPressed: () => _navigateToTraders(context),
+            )
           ],
         ),
+        
+        // الجسم يحتوي الآن على الأقسام فقط بشكل مباشر
+        body: _buildMainCategoriesGrid(),
+
+        // 2. إضافة الزر العائم للوصول السريع للموردين
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () => _navigateToTraders(context),
+          backgroundColor: const Color(0xFF4CAF50),
+          icon: const Icon(Icons.location_on, color: Colors.white),
+          label: const Text("الموردين المتاحين حولك", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        ),
       ),
+    );
+  }
+
+  // دالة الانتقال لصفحة التجار
+  void _navigateToTraders(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const RepTradersLiteScreen()),
     );
   }
 
@@ -66,7 +71,7 @@ class _RepStoreLiteScreenState extends State<RepStoreLiteScreen> with SingleTick
         final docs = snapshot.data!.docs;
 
         return GridView.builder(
-          padding: const EdgeInsets.all(15),
+          padding: const EdgeInsets.fromLTRB(15, 15, 15, 80), // زيادة الـ padding السفلي عشان الزر العائم ميغطيش الأقسام
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
             childAspectRatio: 1.1,
@@ -80,7 +85,6 @@ class _RepStoreLiteScreenState extends State<RepStoreLiteScreen> with SingleTick
 
             return InkWell(
               onTap: () {
-                // 🟢 الربط هنا: الانتقال لصفحة الأقسام الفرعية
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -108,7 +112,7 @@ class _RepStoreLiteScreenState extends State<RepStoreLiteScreen> with SingleTick
                   children: [
                     Expanded(
                       child: Padding(
-                        padding: const EdgeInsets.all(10.0),
+                        padding: const EdgeInsets.all(12.0),
                         child: cat['imageUrl'] != null
                             ? Image.network(cat['imageUrl'], fit: BoxFit.contain)
                             : const Icon(Icons.category_outlined, size: 50, color: Colors.grey),
@@ -132,46 +136,6 @@ class _RepStoreLiteScreenState extends State<RepStoreLiteScreen> with SingleTick
                     ),
                   ],
                 ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildTradersList() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _db.collection('users').where('role', isEqualTo: 'merchant').snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-        final traders = snapshot.data!.docs;
-
-        return ListView.builder(
-          padding: const EdgeInsets.all(12),
-          itemCount: traders.length,
-          itemBuilder: (context, index) {
-            var trader = traders[index].data() as Map<String, dynamic>;
-            return Card(
-              elevation: 0,
-              margin: const EdgeInsets.only(bottom: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: Colors.grey.shade200),
-              ),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: const Color(0xFFE8F5E9),
-                  child: const Icon(Icons.store, color: Color(0xFF4CAF50)),
-                ),
-                title: Text(trader['fullname'] ?? 'تاجر غير مسمى', 
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text("كود التاجر: ${trader['repCode'] ?? '---'}", 
-                    style: const TextStyle(fontSize: 12)),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
-                onTap: () {
-                  // مستقبلاً: فتح قائمة منتجات هذا التاجر فقط
-                },
               ),
             );
           },
