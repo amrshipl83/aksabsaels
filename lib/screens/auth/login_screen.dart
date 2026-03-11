@@ -97,7 +97,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // البحث في كولكشن المناديب (تأكد من مطابقة الاسم في Firestore)
       final salesRepQuery = await FirebaseFirestore.instance
-          .collection('salesReps') // تم توحيد الاسم لـ salesReps
+          .collection('salesRep') // تم توحيد الاسم لـ salesReps
           .where('uid', isEqualTo: user.uid)
           .limit(1)
           .get();
