@@ -3,8 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:geolocator/geolocator.dart'; // ✅ لإدارة الموقع
-import 'package:permission_handler/permission_handler.dart'; // ✅ لإدارة الأذونات
+import 'package:geolocator/geolocator.dart'; 
+import 'package:permission_handler/permission_handler.dart'; 
 import 'dart:convert';
 
 import 'sales_rep_dashboard.dart';
@@ -46,7 +46,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     _setupNotifications();
   }
 
-  // --- نظام أذونات الإشعارات مع رسالة إفصاح ---
+  // --- نظام التنبيهات ---
   Future<void> _setupNotifications() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
     NotificationSettings settings = await messaging.getNotificationSettings();
@@ -58,7 +58,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
           body: 'نحتاج لتفعيل التنبيهات لإرسال تحديثات الطلبات الميدانية ورسائل الإدارة الهامة لك.',
           icon: Icons.notifications_active_outlined,
         );
-
         if (startRequest == true) {
           await messaging.requestPermission(alert: true, badge: true, sound: true);
         }
@@ -66,7 +65,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     }
   }
 
-  // --- نظام أذونات الموقع مع رسالة إفصاح قبل بدء اليوم ---
+  // --- نظام أذونات الموقع ---
   Future<bool> _handleLocationPermission() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -81,7 +80,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
         body: 'يتطلب "أكسب مبيعات" الوصول لموقعك الجغرافي لتسجيل "بصمة حضور العمل" وضمان تسجيل الزيارات للعملاء بدقة.',
         icon: Icons.location_on_outlined,
       );
-
       if (confirm == true) {
         permission = await Geolocator.requestPermission();
       }
@@ -146,7 +144,12 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
         currentDayStartTime = (docData['startTime'] as Timestamp?)?.toDate();
         setState(() { _isDayOpen = true; _statusMessage = 'يوم العمل مفتوح حالياً'; });
       } else {
-        setState(() { _isDayOpen = false; _statusMessage = 'يرجى بدء يوم العمل'; });
+        setState(() { 
+          _isDayOpen = false; 
+          currentDayLogId = null;
+          currentDayStartTime = null;
+          _statusMessage = 'يرجى بدء يوم العمل'; 
+        });
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -160,7 +163,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     setState(() => _isLoading = true);
     try {
       Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      
       await db.collection("daily_logs").add({
         'repCode': repData!['repCode'],
         'repName': repData!['fullname'],
@@ -204,7 +206,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
         backgroundColor: kBgColor,
         drawer: _buildMainDrawer(),
         appBar: AppBar(
-          title: const Text('لوحة تحكم المندوب', style: TextStyle(fontWeight: FontWeight.bold)),
+          title: const Text('أكسب للمبيعات', style: TextStyle(fontWeight: FontWeight.bold)),
           centerTitle: true,
           backgroundColor: Colors.white,
           foregroundColor: kSecondaryColor,
@@ -230,6 +232,11 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                     )
                   else if (!_isLoading)
                     _buildEmptyState(),
+                  if (_isLoading)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 40),
+                      child: CircularProgressIndicator(color: kPrimaryColor),
+                    ),
                 ],
               ),
             ),
@@ -244,7 +251,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.grey.shade200)),
       child: Row(children: [
-        Icon(Icons.info_outline_rounded, color: kPrimaryColor),
+        const Icon(Icons.info_outline_rounded, color: kPrimaryColor),
         const SizedBox(width: 10),
         Text(_statusMessage, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
       ]),
@@ -274,12 +281,12 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
       child: Column(children: [
         Icon(Icons.location_off_outlined, size: 80, color: Colors.grey.shade400),
         const SizedBox(height: 15),
-        const Text('يجب فتح يوم العمل لتفعيل عدادات الإنجاز والزيارات.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+        const Text('يجب فتح يوم العمل لتفعيل عدادات الإنجاز والزيارات والطلبات.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
       ]),
     );
   }
 
-  // --- Drawer (تم تعديل الألوان لتناسب الأحمر) ---
+  // --- Drawer (استرجاع كافة الأيقونات من الكود الأصلي) ---
   Widget _buildMainDrawer() {
     return Drawer(
       child: Container(
@@ -289,18 +296,47 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
             UserAccountsDrawerHeader(
               decoration: const BoxDecoration(color: Color(0xFF14212D)),
               currentAccountPicture: const CircleAvatar(backgroundColor: kPrimaryColor, child: Icon(Icons.person, color: Colors.white, size: 40)),
-              accountName: Text(repData?['fullname'] ?? 'مندوب مبيعات'),
+              accountName: Text(repData?['fullname'] ?? 'مندوب مبيعات', style: const TextStyle(fontWeight: FontWeight.bold)),
               accountEmail: Text('كود الموظف: ${repData?['repCode'] ?? '...'}'),
             ),
             Expanded(child: ListView(children: [
-              _drawerItem(Icons.home_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
-              _drawerItem(Icons.people_outline, "قائمة عملائي", false, onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen())); }),
+              _drawerItem(Icons.dashboard_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
+              
+              _drawerItem(Icons.storefront_outlined, "المتجر", false, onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const RepStoreLiteScreen()));
+              }),
+              
+              _drawerItem(Icons.track_changes_outlined, "الأهداف", false, onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
+              }),
+
+              _drawerItem(Icons.people_outline, "قائمة عملائي", false, onTap: () { 
+                Navigator.pop(context); 
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen())); 
+              }),
+
+              _drawerItem(Icons.receipt_outlined, "طلباتي", false, onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const MyOrdersScreen()));
+              }),
+
               _drawerItem(Icons.location_on_outlined, "بدء زيارة", false, onTap: () {
                 Navigator.pop(context);
                 if (_isDayOpen) { Navigator.push(context, MaterialPageRoute(builder: (context) => const VisitScreen())); }
-                else { _showSnackBar("❌ يرجى فتح اليوم أولاً"); }
+                else { _showSnackBar("❌ يرجى فتح اليوم أولاً لتسجيل الزيارات"); }
               }),
-              _drawerItem(Icons.bar_chart_outlined, "تقارير الإنجاز", false, onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const RepReportsScreen())); }),
+
+              _drawerItem(Icons.local_offer_outlined, "مركز العروض والجوائز", false, onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
+              }),
+
+              _drawerItem(Icons.bar_chart_outlined, "تقارير الإنجاز", false, onTap: () { 
+                Navigator.pop(context); 
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const RepReportsScreen())); 
+              }),
             ])),
             const Divider(color: Colors.white24),
             _drawerItem(Icons.logout, "تسجيل الخروج", false, color: Colors.redAccent, onTap: () async {
