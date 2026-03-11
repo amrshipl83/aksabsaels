@@ -168,7 +168,7 @@ class _VisitScreenState extends State<VisitScreen> {
   Future<void> _startVisit() async {
     if (_selectedCustomerId == null) return;
     setState(() => _isLoading = true);
-    
+
     Position? position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
     final customer = _customers.firstWhere((doc) => doc.id == _selectedCustomerId);
     final customerName = customer['fullname'];
@@ -199,7 +199,7 @@ class _VisitScreenState extends State<VisitScreen> {
   Future<void> _endVisit() async {
     if (_visitStatus == null) return;
     setState(() => _isLoading = true);
-    
+
     await FirebaseFirestore.instance.collection('visits').doc(_currentVisitId).update({
       'status': _visitStatus,
       'notes': _notesController.text,
@@ -234,7 +234,7 @@ class _VisitScreenState extends State<VisitScreen> {
         backgroundColor: const Color(0xFF43B97F),
         foregroundColor: Colors.white,
       ),
-      body: _isLoading 
+      body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF43B97F)))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(20.0),
@@ -258,7 +258,7 @@ class _VisitScreenState extends State<VisitScreen> {
           ),
         ),
         const SizedBox(height: 15),
-        const Text("اختر العميل (الأقرب لك دائماً في البداية)", 
+        const Text("اختر العميل (الأقرب لك دائماً في البداية)",
             style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
         const SizedBox(height: 10),
         Container(
@@ -268,7 +268,7 @@ class _VisitScreenState extends State<VisitScreen> {
             borderRadius: BorderRadius.circular(15),
             border: Border.all(color: Colors.grey.shade200),
           ),
-          child: _filteredCustomers.isEmpty 
+          child: _filteredCustomers.isEmpty
             ? const Center(child: Text("لا يوجد عملاء متاحين"))
             : ListView.builder(
                 itemCount: _filteredCustomers.length,
@@ -300,7 +300,18 @@ class _VisitScreenState extends State<VisitScreen> {
         ),
         const SizedBox(height: 15),
         OutlinedButton.icon(
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const AddNewCustomerScreen())),
+          onPressed: () {
+            // ✅ تم دمج الحل الأول: التحديث التلقائي عند العودة من شاشة التسجيل
+            Navigator.push(
+              context, 
+              MaterialPageRoute(builder: (context) => const AddNewCustomerScreen())
+            ).then((_) {
+              if (_userData != null) {
+                // إعادة تحميل العملاء لضمان ظهور العميل الجديد فوراً
+                _loadCustomers(_userData!['repCode']);
+              }
+            });
+          },
           icon: const Icon(Icons.person_add),
           label: const Text("تسجيل عميل جديد"),
           style: OutlinedButton.styleFrom(
