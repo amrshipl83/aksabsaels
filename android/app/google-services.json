@@ -8,6 +8,64 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:32660558108:android:a6e0460d66579eea53ead9",
+        "android_client_info": {
+          "package_name": "com.aksab.driver"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "32660558108-46dpch45vfppikkvo34j81906k767v16.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCczxrmzYiFRZuDHOqhgqcH-DGvV1z8WZ0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "32660558108-46dpch45vfppikkvo34j81906k767v16.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:32660558108:android:128078ba189177fe53ead9",
+        "android_client_info": {
+          "package_name": "com.aksab.sales"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "32660558108-46dpch45vfppikkvo34j81906k767v16.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCczxrmzYiFRZuDHOqhgqcH-DGvV1z8WZ0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "32660558108-46dpch45vfppikkvo34j81906k767v16.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:32660558108:android:102632793b65058953ead9",
         "android_client_info": {
           "package_name": "com.aksabeg500"
