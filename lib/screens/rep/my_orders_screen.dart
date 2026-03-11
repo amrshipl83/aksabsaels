@@ -18,7 +18,6 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
   List<Map<String, dynamic>> _filteredOrders = [];
   Map<String, dynamic>? _userData;
 
-  // فلاتر البحث
   final TextEditingController _searchController = TextEditingController();
   DateTime? _startDate;
   DateTime? _endDate;
@@ -45,28 +44,40 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       final userDataString = prefs.getString('userData');
       if (userDataString == null) return;
       _userData = jsonDecode(userDataString);
-      
+
       final String repCode = _userData!['repCode'];
 
-      // جلب الطلبات المرتبطة بكود المندوب
+      // 1. جلب الـ IDs الخاصة بكل العملاء المسجلين تحت كود هذا المندوب
+      final customersSnapshot = await _db
+          .collection("users")
+          .where("repCode", isEqualTo: repCode)
+          .get();
+
+      // قائمة بـ UIDs العملاء التابعين للمندوب
+      Set<String> myCustomerIds = customersSnapshot.docs.map((doc) => doc.id).toSet();
+
+      // 2. جلب الطلبات (سنقوم بفلترتها محلياً لحل مشكلة نقص repCode في الطلب)
+      // ملاحظة: جلب آخر 100 طلب مثلاً لضمان الأداء، أو جلب الكل إذا كان العدد صغيراً
       final querySnapshot = await _db
           .collection("orders")
-          .where("buyer.repCode", isEqualTo: repCode)
+          .orderBy("orderDate", descending: true)
+          .limit(200) // حددنا الكمية لضمان سرعة التطبيق
           .get();
 
       final List<Map<String, dynamic>> fetched = [];
       for (var doc in querySnapshot.docs) {
         var data = doc.data();
-        data['id'] = doc.id;
-        fetched.add(data);
-      }
+        String? orderBuyerUid = data['buyer']?['id']; // تأكد من مسمى الحقل في الطلب (id أو uid)
+        String? orderRepCode = data['buyer']?['repCode'];
 
-      // ترتيب تنازلي حسب التاريخ
-      fetched.sort((a, b) {
-        DateTime dateA = (a['orderDate'] as Timestamp?)?.toDate() ?? DateTime(2000);
-        DateTime dateB = (b['orderDate'] as Timestamp?)?.toDate() ?? DateTime(2000);
-        return dateB.compareTo(dateA);
-      });
+        // الشرط السحري: 
+        // اظهر الطلب لو الكود موجود (للمستقبل) 
+        // أو لو الـ UID بتاع المشتري موجود في قائمة عملاء المندوب ده (للماضي والحاضر)
+        if (orderRepCode == repCode || myCustomerIds.contains(orderBuyerUid)) {
+          data['id'] = doc.id;
+          fetched.add(data);
+        }
+      }
 
       setState(() {
         _allOrders = fetched;
@@ -79,6 +90,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     }
   }
 
+  // دالة الفلترة والبحث كما هي دون تغيير
   void _applyFilters() {
     setState(() {
       _filteredOrders = _allOrders.where((order) {
@@ -87,8 +99,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         final searchText = _searchController.text.toLowerCase();
 
         bool matchesSearch = orderId.contains(searchText) || clientName.contains(searchText);
-        
-        bool matchesStatus = _selectedStatus == "" || 
+        bool matchesStatus = _selectedStatus == "" ||
             (order['status']?.toString().toLowerCase() == _selectedStatus.toLowerCase());
 
         bool matchesDate = true;
@@ -109,7 +120,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text("طلباتي", style: TextStyle(fontWeight: FontWeight.bold)),
+          title: const Text("طلباتي (مبيعات المندوب)", style: TextStyle(fontWeight: FontWeight.bold)),
           backgroundColor: const Color(0xFF43B97F),
           foregroundColor: Colors.white,
           centerTitle: true,
@@ -129,13 +140,16 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator(color: Color(0xFF43B97F)))
                     : _filteredOrders.isEmpty
-                        ? const Center(child: Text("لا توجد طلبات مطابقة للبحث"))
-                        : ListView.builder(
-                            padding: const EdgeInsets.all(10),
-                            itemCount: _filteredOrders.length,
-                            itemBuilder: (context, index) {
-                              return _buildOrderCard(_filteredOrders[index]);
-                            },
+                        ? const Center(child: Text("لا توجد طلبات مسجلة لعملائك"))
+                        : RefreshIndicator(
+                            onRefresh: _loadOrders,
+                            child: ListView.builder(
+                              padding: const EdgeInsets.all(10),
+                              itemCount: _filteredOrders.length,
+                              itemBuilder: (context, index) {
+                                return _buildOrderCard(_filteredOrders[index]);
+                              },
+                            ),
                           ),
               ),
             ],
@@ -144,6 +158,8 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       ),
     );
   }
+
+  // --- بناء العناصر (Widgets) كما هي في الملف الأصلي مع تحسينات طفيفة ---
 
   Widget _buildFilterSection() {
     return Container(
@@ -185,10 +201,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                 onPressed: () async {
                   DateTimeRange? picked = await showDateRangePicker(context: context, firstDate: DateTime(2022), lastDate: DateTime.now());
                   if (picked != null) {
-                    setState(() {
-                      _startDate = picked.start;
-                      _endDate = picked.end;
-                    });
+                    setState(() { _startDate = picked.start; _endDate = picked.end; });
                     _applyFilters();
                   }
                 },
@@ -210,16 +223,16 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
   }
 
   Widget _buildOrderCard(Map<String, dynamic> order) {
-    String dateStr = order['orderDate'] != null 
+    String dateStr = order['orderDate'] != null
         ? intl.DateFormat('yyyy-MM-dd').format((order['orderDate'] as Timestamp).toDate())
         : "غير متوفر";
-    
+
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
         onTap: () => _showOrderDetails(order),
-        title: Text("طلب رقم: ${order['id']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        title: Text("طلب رقم: ${order['id'].toString().substring(0, 8)}...", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -275,7 +288,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text("${item['name']}"),
+                        Expanded(child: Text("${item['name']}")),
                         Text("الكمية: ${item['quantity']} | ${item['price']} ج.م"),
                       ],
                     ),
