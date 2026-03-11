@@ -2,23 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; 
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:geolocator/geolocator.dart'; // ✅ لإدارة الموقع
+import 'package:permission_handler/permission_handler.dart'; // ✅ لإدارة الأذونات
 import 'dart:convert';
+
 import 'sales_rep_dashboard.dart';
 import 'visit_screen.dart';
 import 'goals_screen.dart';
 import 'my_customers_screen.dart';
 import 'my_orders_screen.dart';
 import 'rep_store_lite_screen.dart';
-import 'rep_reports_screen.dart'; // ✅ تم إضافة الاستيراد هنا
+import 'rep_reports_screen.dart';
 import '../admin/offers_screen.dart';
 
-// --- الثوابت اللونية ---
-const Color kPrimaryColor = Color(0xFF3498db);
-const Color kSecondaryColor = Color(0xFF2c3e50);
-const Color kSuccessColor = Color(0xFF28a745);
-const Color kErrorColor = Color(0xFFdc3545);
-const Color kBgColor = Color(0xFFf0f2f5);
+// --- الثوابت اللونية لهوية أكسب مبيعات ---
+const Color kPrimaryColor = Color(0xFFB21F2D); // أحمر أكسب
+const Color kSecondaryColor = Color(0xFF1A2C3D); 
+const Color kSuccessColor = Color(0xFF2E7D32); 
+const Color kErrorColor = Color(0xFFC62828);   
+const Color kBgColor = Color(0xFFF8F9FA);
 
 class SalesRepHomeScreen extends StatefulWidget {
   const SalesRepHomeScreen({super.key});
@@ -43,39 +46,78 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     _setupNotifications();
   }
 
+  // --- نظام أذونات الإشعارات مع رسالة إفصاح ---
   Future<void> _setupNotifications() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
     NotificationSettings settings = await messaging.getNotificationSettings();
+
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
       if (mounted) {
-        bool? startRequest = await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-            title: const Text('تفعيل التنبيهات', textAlign: TextAlign.center),
-            content: const Text(
-              'يرجى تفعيل التنبيهات لتتمكن من استلام تحديثات الطلبات، تنبيهات الأهداف الميدانية، والرسائل الهامة من الإدارة فور صدورها.',
-              textAlign: TextAlign.center,
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('لاحقاً', style: TextStyle(color: Colors.grey)),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(backgroundColor: kPrimaryColor),
-                child: const Text('موافق', style: TextStyle(color: Colors.white)),
-              ),
-            ],
-          ),
+        bool? startRequest = await _showDisclosureDialog(
+          title: 'تفعيل التنبيهات',
+          body: 'نحتاج لتفعيل التنبيهات لإرسال تحديثات الطلبات الميدانية ورسائل الإدارة الهامة لك.',
+          icon: Icons.notifications_active_outlined,
         );
+
         if (startRequest == true) {
           await messaging.requestPermission(alert: true, badge: true, sound: true);
         }
       }
     }
+  }
+
+  // --- نظام أذونات الموقع مع رسالة إفصاح قبل بدء اليوم ---
+  Future<bool> _handleLocationPermission() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      _showSnackBar("❌ يرجى تفعيل الـ GPS في هاتفك أولاً");
+      return false;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      bool? confirm = await _showDisclosureDialog(
+        title: 'إذن الوصول للموقع',
+        body: 'يتطلب "أكسب مبيعات" الوصول لموقعك الجغرافي لتسجيل "بصمة حضور العمل" وضمان تسجيل الزيارات للعملاء بدقة.',
+        icon: Icons.location_on_outlined,
+      );
+
+      if (confirm == true) {
+        permission = await Geolocator.requestPermission();
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      _showSnackBar("❌ إذن الموقع مرفوض دائماً، يرجى تفعيله من إعدادات الجهاز");
+      return false;
+    }
+    return permission == LocationPermission.always || permission == LocationPermission.whileInUse;
+  }
+
+  Future<bool?> _showDisclosureDialog({required String title, required String body, required IconData icon}) {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Column(
+          children: [
+            Icon(icon, size: 40, color: kPrimaryColor),
+            const SizedBox(height: 10),
+            Text(title, textAlign: TextAlign.center),
+          ],
+        ),
+        content: Text(body, textAlign: TextAlign.center),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('ليس الآن', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: kPrimaryColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+            child: const Text('موافق وفهمت', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _checkUserDataAndDayStatus() async {
@@ -102,32 +144,37 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
         final docData = querySnapshot.docs[0].data();
         currentDayLogId = querySnapshot.docs[0].id;
         currentDayStartTime = (docData['startTime'] as Timestamp?)?.toDate();
-        _isDayOpen = true;
-        _statusMessage = 'يوم العمل مفتوح حالياً';
+        setState(() { _isDayOpen = true; _statusMessage = 'يوم العمل مفتوح حالياً'; });
       } else {
-        _isDayOpen = false;
-        currentDayLogId = null;
-        currentDayStartTime = null;
-        _statusMessage = 'يرجى بدء يوم العمل';
+        setState(() { _isDayOpen = false; _statusMessage = 'يرجى بدء يوم العمل'; });
       }
-    } catch (e) {
-      _statusMessage = 'خطأ في جلب البيانات';
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _startDay() async {
+    bool hasPermission = await _handleLocationPermission();
+    if (!hasPermission) return;
+
     setState(() => _isLoading = true);
     try {
+      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      
       await db.collection("daily_logs").add({
         'repCode': repData!['repCode'],
         'repName': repData!['fullname'],
         'startTime': FieldValue.serverTimestamp(),
         'status': "open",
+        'startLocation': {
+          'lat': position.latitude,
+          'lng': position.longitude,
+        },
       });
       await _checkDayStatus();
     } catch (e) {
+      _showSnackBar("❌ فشل تسجيل الموقع، حاول مرة أخرى");
+    } finally {
       setState(() => _isLoading = false);
     }
   }
@@ -140,9 +187,13 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
         'status': "closed",
       });
       await _checkDayStatus();
-    } catch (e) {
-      setState(() => _isLoading = false);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _showSnackBar(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: kPrimaryColor));
   }
 
   @override
@@ -153,27 +204,24 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
         backgroundColor: kBgColor,
         drawer: _buildMainDrawer(),
         appBar: AppBar(
-          title: const Text('لوحة المندوب', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          title: const Text('لوحة تحكم المندوب', style: TextStyle(fontWeight: FontWeight.bold)),
           centerTitle: true,
           backgroundColor: Colors.white,
           foregroundColor: kSecondaryColor,
-          elevation: 0.5,
-          actions: [
-            IconButton(icon: const Icon(Icons.refresh), onPressed: _checkDayStatus)
-          ],
+          elevation: 0,
+          actions: [IconButton(icon: const Icon(Icons.sync_rounded), onPressed: _checkDayStatus)],
         ),
         body: SafeArea(
           child: RefreshIndicator(
             onRefresh: _checkDayStatus,
             child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
                   _buildUserInfoHeader(),
                   const SizedBox(height: 20),
                   _buildActionButtons(),
-                  const SizedBox(height: 15),
+                  const SizedBox(height: 20),
                   if (_isDayOpen && currentDayStartTime != null)
                     SalesRepDashboard(
                       repCode: repData!['repCode'],
@@ -182,11 +230,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                     )
                   else if (!_isLoading)
                     _buildEmptyState(),
-                  if (_isLoading)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 40),
-                      child: CircularProgressIndicator(color: kPrimaryColor),
-                    ),
                 ],
               ),
             ),
@@ -196,104 +239,77 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     );
   }
 
+  Widget _buildUserInfoHeader() {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.grey.shade200)),
+      child: Row(children: [
+        Icon(Icons.info_outline_rounded, color: kPrimaryColor),
+        const SizedBox(width: 10),
+        Text(_statusMessage, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+      ]),
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _isLoading ? null : (_isDayOpen ? _endDay : _startDay),
+        icon: Icon(_isDayOpen ? Icons.stop_rounded : Icons.play_arrow_rounded, size: 28),
+        label: Text(_isDayOpen ? "إنهاء وردية العمل" : "بدء يوم عمل جديد", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _isDayOpen ? kErrorColor : kSuccessColor,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 18),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 40),
+      child: Column(children: [
+        Icon(Icons.location_off_outlined, size: 80, color: Colors.grey.shade400),
+        const SizedBox(height: 15),
+        const Text('يجب فتح يوم العمل لتفعيل عدادات الإنجاز والزيارات.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+      ]),
+    );
+  }
+
+  // --- Drawer (تم تعديل الألوان لتناسب الأحمر) ---
   Widget _buildMainDrawer() {
     return Drawer(
       child: Container(
         color: kSecondaryColor,
         child: SafeArea(
-          child: Column(
-            children: [
-              UserAccountsDrawerHeader(
-                decoration: const BoxDecoration(color: Color(0xFF1c2a38)),
-                currentAccountPicture: const CircleAvatar(
-                  backgroundColor: kPrimaryColor,
-                  child: Icon(Icons.person, color: Colors.white, size: 40),
-                ),
-                accountName: Text(repData?['fullname'] ?? 'مندوب المبيعات',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                accountEmail: Text('الكود: ${repData?['repCode'] ?? '...'}'),
-              ),
-              Expanded(
-                child: ListView(
-                  padding: EdgeInsets.zero,
-                  children: [
-                    _drawerItem(Icons.dashboard_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
-                    _drawerItem(
-                        Icons.storefront_outlined,
-                        "المتجر",
-                        false,
-                        onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => const RepStoreLiteScreen()));
-                        }),
-                    _drawerItem(
-                        Icons.track_changes_outlined,
-                        "الأهداف",
-                        false,
-                        onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
-                        }),
-                    _drawerItem(
-                        Icons.people_outline,
-                        "عملائي",
-                        false,
-                        onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen()));
-                        }),
-                    _drawerItem(
-                        Icons.receipt_outlined,
-                        "طلباتي",
-                        false,
-                        onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => const MyOrdersScreen()));
-                        }),
-                    _drawerItem(
-                        Icons.location_on_outlined,
-                        "الزيارات",
-                        false,
-                        onTap: () {
-                          Navigator.pop(context);
-                          if (_isDayOpen) {
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => const VisitScreen()));
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("❌ يجب بدء يوم العمل أولاً لتسجيل الزيارات")),
-                            );
-                          }
-                        }),
-                    _drawerItem(
-                        Icons.local_offer_outlined,
-                        "مركز العروض والجوائز",
-                        false,
-                        onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
-                        }),
-                    _drawerItem(
-                        Icons.bar_chart_outlined, 
-                        "التقارير", 
-                        false,
-                        onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => const RepReportsScreen()));
-                        }
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(color: Colors.white24),
-              _drawerItem(Icons.logout, "خروج", false, color: Colors.redAccent, onTap: () async {
-                await FirebaseAuth.instance.signOut();
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.clear();
-                if (mounted) Navigator.of(context).pushReplacementNamed('/');
+          child: Column(children: [
+            UserAccountsDrawerHeader(
+              decoration: const BoxDecoration(color: Color(0xFF14212D)),
+              currentAccountPicture: const CircleAvatar(backgroundColor: kPrimaryColor, child: Icon(Icons.person, color: Colors.white, size: 40)),
+              accountName: Text(repData?['fullname'] ?? 'مندوب مبيعات'),
+              accountEmail: Text('كود الموظف: ${repData?['repCode'] ?? '...'}'),
+            ),
+            Expanded(child: ListView(children: [
+              _drawerItem(Icons.home_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
+              _drawerItem(Icons.people_outline, "قائمة عملائي", false, onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen())); }),
+              _drawerItem(Icons.location_on_outlined, "بدء زيارة", false, onTap: () {
+                Navigator.pop(context);
+                if (_isDayOpen) { Navigator.push(context, MaterialPageRoute(builder: (context) => const VisitScreen())); }
+                else { _showSnackBar("❌ يرجى فتح اليوم أولاً"); }
               }),
-              const SizedBox(height: 10),
-            ],
-          ),
+              _drawerItem(Icons.bar_chart_outlined, "تقارير الإنجاز", false, onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const RepReportsScreen())); }),
+            ])),
+            const Divider(color: Colors.white24),
+            _drawerItem(Icons.logout, "تسجيل الخروج", false, color: Colors.redAccent, onTap: () async {
+              await FirebaseAuth.instance.signOut();
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.clear();
+              if (mounted) Navigator.of(context).pushReplacementNamed('/');
+            }),
+          ]),
         ),
       ),
     );
@@ -303,59 +319,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     return ListTile(
       leading: Icon(icon, color: color ?? (isSelected ? kPrimaryColor : Colors.white70)),
       title: Text(title, style: TextStyle(color: color ?? Colors.white)),
-      selected: isSelected,
-      onTap: onTap ?? () => Navigator.pop(context),
-    );
-  }
-
-  Widget _buildUserInfoHeader() {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.info_outline, color: kPrimaryColor),
-          const SizedBox(width: 10),
-          Text(_statusMessage, style: const TextStyle(fontWeight: FontWeight.bold, color: kSecondaryColor)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButtons() {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: _isLoading ? null : (_isDayOpen ? _endDay : _startDay),
-        icon: Icon(_isDayOpen ? Icons.stop_circle_outlined : Icons.play_circle_outline),
-        label: Text(_isDayOpen ? "إنهاء يوم العمل" : "بدء يوم العمل",
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: _isDayOpen ? kErrorColor : kSuccessColor,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 15),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 60),
-      child: Column(
-        children: [
-          Icon(Icons.event_busy_outlined, size: 80, color: Colors.grey.shade400),
-          const SizedBox(height: 15),
-          const Text('لا يوجد يوم عمل مفتوح حالياً.\nاضغط على الزر أعلاه للبدء.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey, fontSize: 16)),
-        ],
-      ),
+      onTap: onTap,
     );
   }
 }
