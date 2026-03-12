@@ -6,8 +6,8 @@ class RepTraderOffersScreen extends StatefulWidget {
   final String sellerName;
 
   const RepTraderOffersScreen({
-    super.key, 
-    required this.sellerId, 
+    super.key,
+    required this.sellerId,
     required this.sellerName
   });
 
@@ -17,23 +17,21 @@ class RepTraderOffersScreen extends StatefulWidget {
 
 class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  
-  // سلة الديمو (Demo Cart)
-  final Map<String, int> _demoCart = {}; 
+
+  // سلة المحاكاة
+  final Map<String, int> _demoCart = {};
   double _totalAmount = 0.0;
 
   void _updateCart(String productId, double price, int change) {
     setState(() {
       int currentQty = _demoCart[productId] ?? 0;
       int newQty = currentQty + change;
-      
+
       if (newQty <= 0) {
         _demoCart.remove(productId);
       } else {
         _demoCart[productId] = newQty;
       }
-      
-      // تحديث الإجمالي اللحظي
       _totalAmount += (change * price);
     });
   }
@@ -49,7 +47,7 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(widget.sellerName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const Text("عروض المورد في منطقتك", style: TextStyle(fontSize: 11, color: Colors.green)),
+              const Text("العروض المتاحة حالياً", style: TextStyle(fontSize: 11, color: Colors.green)),
             ],
           ),
           backgroundColor: Colors.white,
@@ -60,57 +58,76 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
           children: [
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
-                // فلترة المنتجات حسب الـ sellerId وحالة المنتج
-                stream: _db.collection('products')
+                // 💡 التعديل هنا: القراءة من كولكشن productOffers
+                stream: _db.collection('productOffers')
                     .where('sellerId', isEqualTo: widget.sellerId)
                     .where('status', isEqualTo: 'active')
                     .snapshots(),
                 builder: (context, snapshot) {
+                  if (snapshot.hasError) return Center(child: Text("خطأ: ${snapshot.error}"));
                   if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                  
-                  var products = snapshot.data!.docs;
-                  
-                  if (products.isEmpty) {
-                    return const Center(child: Text("لا توجد منتجات متاحة لهذا المورد حالياً"));
+
+                  var offers = snapshot.data!.docs;
+
+                  if (offers.isEmpty) {
+                    return const Center(child: Text("لا توجد عروض نشطة لهذا المورد"));
                   }
 
                   return ListView.builder(
                     padding: const EdgeInsets.all(12),
-                    itemCount: products.length,
+                    itemCount: offers.length,
                     itemBuilder: (context, index) {
-                      var product = products[index].data() as Map<String, dynamic>;
-                      String pId = products[index].id;
-                      double price = (product['price'] ?? 0.0).toDouble();
-                      int qty = _demoCart[pId] ?? 0;
+                      var offer = offers[index].data() as Map<String, dynamic>;
+                      String oId = offers[index].id;
+                      
+                      // 💡 استخراج السعر من مصفوفة الوحدات (أول وحدة متاحة)
+                      List units = offer['units'] ?? [];
+                      double price = 0.0;
+                      String unitName = "قطعة";
+                      
+                      if (units.isNotEmpty) {
+                        price = (units[0]['price'] ?? 0.0).toDouble();
+                        unitName = units[0]['unitName'] ?? "وحدة";
+                      }
+
+                      int qty = _demoCart[oId] ?? 0;
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                         child: ListTile(
-                          contentPadding: const EdgeInsets.all(10),
+                          contentPadding: const EdgeInsets.all(12),
                           leading: Container(
                             width: 60, height: 60,
                             decoration: BoxDecoration(
-                              color: Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(8),
+                              color: Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(10),
                             ),
-                            child: product['imageUrl'] != null 
-                                ? Image.network(product['imageUrl'], fit: BoxFit.contain)
-                                : const Icon(Icons.image_not_supported, color: Colors.grey),
+                            child: (offer['imageUrl'] != null && offer['imageUrl'] != "")
+                                ? Image.network(offer['imageUrl'], fit: BoxFit.contain)
+                                : const Icon(Icons.shopping_bag_outlined, color: Colors.grey),
                           ),
-                          title: Text(product['name'] ?? 'منتج غير مسمى', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: Text("${price.toStringAsFixed(2)} ج.م", style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                          title: Text(offer['productName'] ?? 'عرض بدون اسم', 
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text("سعر ال$unitName", style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                              Text("${price.toStringAsFixed(2)} ج.م", 
+                                  style: const TextStyle(color: Color(0xFF43B97F), fontWeight: FontWeight.bold)),
+                            ],
+                          ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (qty > 0) ...[
-                                _cartButton(Icons.remove, () => _updateCart(pId, price, -1)),
+                                _cartButton(Icons.remove, () => _updateCart(oId, price, -1)),
                                 Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                                  child: Text("$qty", style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  child: Text("$qty", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                                 ),
                               ],
-                              _cartButton(Icons.add, () => _updateCart(pId, price, 1)),
+                              _cartButton(Icons.add, () => _updateCart(oId, price, 1)),
                             ],
                           ),
                         ),
@@ -120,8 +137,6 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
                 },
               ),
             ),
-            
-            // شريط إجمالي السلة (Demo Cart Bar)
             if (_demoCart.isNotEmpty) _buildCartSummary(),
           ],
         ),
@@ -133,20 +148,23 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
-        child: Icon(icon, size: 20, color: Colors.green),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF43B97F).withOpacity(0.1), 
+          borderRadius: BorderRadius.circular(10)
+        ),
+        child: Icon(icon, size: 20, color: const Color(0xFF43B97F)),
       ),
     );
   }
 
   Widget _buildCartSummary() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 25),
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, -2))],
-        borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 15, offset: const Offset(0, -5))],
+        borderRadius: const BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -155,18 +173,23 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text("إجمالي محاكاة الطلب (${_demoCart.length} منتجات)", style: const TextStyle(fontSize: 12, color: Colors.grey)),
-              Text("${_totalAmount.toStringAsFixed(2)} ج.م", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
+              Text("إجمالي الفاتورة التقريبية", style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              Text("${_totalAmount.toStringAsFixed(2)} ج.م", 
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF43B97F))),
             ],
           ),
           ElevatedButton(
             onPressed: () {
-              // مسح السلة (Reset)
               setState(() { _demoCart.clear(); _totalAmount = 0.0; });
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم مسح محاكاة الطلب")));
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade50, foregroundColor: Colors.red, elevation: 0),
-            child: const Text("مسح"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade50, 
+              foregroundColor: Colors.red, 
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+            ),
+            child: const Text("مسح", style: TextStyle(fontWeight: FontWeight.bold)),
           )
         ],
       ),
