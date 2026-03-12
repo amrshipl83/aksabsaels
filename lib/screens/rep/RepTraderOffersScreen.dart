@@ -74,66 +74,84 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
                   }
 
                   return ListView.builder(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: offers.length,
-                    itemBuilder: (context, index) {
-                      var offer = offers[index].data() as Map<String, dynamic>;
-                      String oId = offers[index].id;
-                      
-                      // 💡 استخراج السعر من مصفوفة الوحدات (أول وحدة متاحة)
-                      List units = offer['units'] ?? [];
-                      double price = 0.0;
-                      String unitName = "قطعة";
-                      
-                      if (units.isNotEmpty) {
-                        price = (units[0]['price'] ?? 0.0).toDouble();
-                        unitName = units[0]['unitName'] ?? "وحدة";
-                      }
+  padding: const EdgeInsets.all(12),
+  itemCount: offers.length,
+  itemBuilder: (context, index) {
+    var offer = offers[index].data() as Map<String, dynamic>;
+    String oId = offers[index].id;
 
-                      int qty = _demoCart[oId] ?? 0;
+    // 1. منطق استخراج الصورة (حل المشكلة)
+    String? finalImageUrl;
+    if (offer['imageUrl'] != null && offer['imageUrl'].toString().isNotEmpty) {
+      finalImageUrl = offer['imageUrl']; // لو مخزنة كـ String مباشر
+    } else if (offer['imageUrls'] != null && (offer['imageUrls'] as List).isNotEmpty) {
+      finalImageUrl = offer['imageUrls'][0]; // لو مخزنة كمصفوفة زي ملف المنتجات
+    }
 
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.all(12),
-                          leading: Container(
-                            width: 60, height: 60,
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade50,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: (offer['imageUrl'] != null && offer['imageUrl'] != "")
-                                ? Image.network(offer['imageUrl'], fit: BoxFit.contain)
-                                : const Icon(Icons.shopping_bag_outlined, color: Colors.grey),
-                          ),
-                          title: Text(offer['productName'] ?? 'عرض بدون اسم', 
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text("سعر ال$unitName", style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                              Text("${price.toStringAsFixed(2)} ج.م", 
-                                  style: const TextStyle(color: Color(0xFF43B97F), fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (qty > 0) ...[
-                                _cartButton(Icons.remove, () => _updateCart(oId, price, -1)),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                                  child: Text("$qty", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                ),
-                              ],
-                              _cartButton(Icons.add, () => _updateCart(oId, price, 1)),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  );
+    // 2. منطق السعر
+    List units = offer['units'] ?? [];
+    double price = 0.0;
+    String unitName = "وحدة";
+    if (units.isNotEmpty) {
+      price = (units[0]['price'] ?? 0.0).toDouble();
+      unitName = units[0]['unitName'] ?? "قطعة";
+    }
+
+    int qty = _demoCart[oId] ?? 0;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(12),
+        leading: Container(
+          width: 60, height: 60,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.grey.shade100), // إطار خفيف
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: (finalImageUrl != null && finalImageUrl.startsWith('http'))
+                ? Image.network(
+                    finalImageUrl, 
+                    fit: BoxFit.contain,
+                    // معالجة الخطأ لو الرابط بايظ عشان التطبيق ميكرشش
+                    errorBuilder: (context, error, stackTrace) => 
+                        const Icon(Icons.broken_image_outlined, color: Colors.grey),
+                  )
+                : const Icon(Icons.shopping_bag_outlined, color: Colors.grey),
+          ),
+        ),
+        title: Text(offer['productName'] ?? 'عرض بدون اسم',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("سعر ال$unitName", style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            Text("${price.toStringAsFixed(2)} ج.م",
+                style: const TextStyle(color: Color(0xFF43B97F), fontWeight: FontWeight.bold)),
+          ],
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (qty > 0) ...[
+              _cartButton(Icons.remove, () => _updateCart(oId, price, -1)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Text("$qty", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+            ],
+            _cartButton(Icons.add, () => _updateCart(oId, price, 1)),
+          ],
+        ),
+      ),
+    );
+  },
+);
+
                 },
               ),
             ),
