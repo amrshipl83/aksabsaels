@@ -64,7 +64,7 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
                     .snapshots(),
                 builder: (context, snapshot) {
                   if (snapshot.hasError) return Center(child: Text("خطأ: ${snapshot.error}"));
-                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Color(0xFF43B97F)));
 
                   var offers = snapshot.data!.docs;
 
@@ -79,21 +79,22 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
                       var offer = offers[index].data() as Map<String, dynamic>;
                       String oId = offers[index].id;
 
-                      // منطق استخراج الصورة
+                      // 💡 استخدام نفس منطق ملف المنتجات لجلب الصور بنجاح
                       String? finalImageUrl;
-                      if (offer['imageUrl'] != null && offer['imageUrl'].toString().isNotEmpty) {
-                        finalImageUrl = offer['imageUrl'];
-                      } else if (offer['imageUrls'] != null && (offer['imageUrls'] as List).isNotEmpty) {
+                      if (offer.containsKey('imageUrls') && offer['imageUrls'] != null && (offer['imageUrls'] as List).isNotEmpty) {
                         finalImageUrl = offer['imageUrls'][0];
+                      } else if (offer['imageUrl'] != null && offer['imageUrl'].toString().isNotEmpty) {
+                        finalImageUrl = offer['imageUrl'];
                       }
 
-                      // منطق السعر
+                      // استخراج السعر من مصفوفة الوحدات
                       List units = offer['units'] ?? [];
                       double price = 0.0;
-                      String unitName = "وحدة";
+                      String unitName = "قطعة";
+
                       if (units.isNotEmpty) {
                         price = (units[0]['price'] ?? 0.0).toDouble();
-                        unitName = units[0]['unitName'] ?? "قطعة";
+                        unitName = units[0]['unitName'] ?? "وحدة";
                       }
 
                       int qty = _demoCart[oId] ?? 0;
@@ -106,16 +107,16 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
                           leading: Container(
                             width: 60, height: 60,
                             decoration: BoxDecoration(
-                              color: Colors.grey.shade50,
+                              color: Colors.white,
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(color: Colors.grey.shade100),
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(10),
-                              child: (finalImageUrl != null && finalImageUrl.startsWith('http'))
+                              child: (finalImageUrl != null && finalImageUrl.toString().startsWith('http'))
                                   ? Image.network(
                                       finalImageUrl, 
-                                      fit: BoxFit.contain,
+                                      fit: BoxFit.cover, // بيملا المربع زي ملف المنتجات
                                       errorBuilder: (context, error, stackTrace) => 
                                           const Icon(Icons.broken_image_outlined, color: Colors.grey),
                                     )
@@ -149,10 +150,15 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
                       );
                     },
                   );
-                }, // إغلاق الـ builder الخاص بالـ StreamBuilder
-              ), // إغلاق الـ StreamBuilder
-            ), // إغلاق الـ Expanded
-            if (_demoCart.isNotEmpty) _buildCartSummary(),
+                }, 
+              ),
+            ),
+            // 🔥 استخدام SafeArea هنا لرفع السلة عن أزرار التنقل السفلية للموبايل
+            if (_demoCart.isNotEmpty) 
+              SafeArea(
+                top: false,
+                child: _buildCartSummary(),
+              ),
           ],
         ),
       ),
@@ -165,7 +171,7 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: const Color(0xFF43B97F).withOpacity(0.1), 
+          color: const Color(0xFF43B97F).withOpacity(0.1),
           borderRadius: BorderRadius.circular(10)
         ),
         child: Icon(icon, size: 20, color: const Color(0xFF43B97F)),
@@ -189,7 +195,7 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text("إجمالي الفاتورة التقريبية", style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-              Text("${_totalAmount.toStringAsFixed(2)} ج.م", 
+              Text("${_totalAmount.toStringAsFixed(2)} ج.م",
                   style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF43B97F))),
             ],
           ),
@@ -198,8 +204,8 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
               setState(() { _demoCart.clear(); _totalAmount = 0.0; });
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade50, 
-              foregroundColor: Colors.red, 
+              backgroundColor: Colors.red.shade50,
+              foregroundColor: Colors.red,
               elevation: 0,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
