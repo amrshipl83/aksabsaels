@@ -7,12 +7,12 @@ import 'package:flutter/services.dart' show rootBundle;
 class RepProductsScreen extends StatefulWidget {
   final String subId;
   final String subName;
-  final Position? initialPosition; 
+  final Position? initialPosition;
 
   const RepProductsScreen({
-    super.key, 
-    required this.subId, 
-    required this.subName, 
+    super.key,
+    required this.subId,
+    required this.subName,
     this.initialPosition
   });
 
@@ -25,7 +25,6 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
   Position? _currentPosition;
   Map<String, List<Map<String, double>>> _areaCoordinates = {};
   bool _isLoading = true;
-
   final Map<String, Map<String, dynamic>> _demoCart = {};
 
   @override
@@ -168,38 +167,37 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
   }
 
   Widget _buildProductsList() {
-  return StreamBuilder<QuerySnapshot>(
-    stream: _db.collection('products')
-        .where('subId', isEqualTo: widget.subId)
-        .where('status', isEqualTo: 'active')
-        .snapshots(),
-    builder: (context, snapshot) {
-      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-      if (snapshot.data!.docs.isEmpty) return const Center(child: Text("لا توجد منتجات حالياً في هذا القسم"));
+    return StreamBuilder<QuerySnapshot>(
+      stream: _db.collection('products')
+          .where('subId', isEqualTo: widget.subId)
+          .where('status', isEqualTo: 'active')
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (snapshot.data!.docs.isEmpty) return const Center(child: Text("لا توجد منتجات حالياً في هذا القسم"));
 
-      return ListView.builder(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
-        itemCount: snapshot.data!.docs.length,
-        itemBuilder: (context, index) {
-          var productDoc = snapshot.data!.docs[index];
-          var productData = productDoc.data() as Map<String, dynamic>; // 👈 تعريف الداتا بوضوح
-          
-          String? imageUrl;
-          if (productData.containsKey('imageUrls') && productData['imageUrls'] != null && (productData['imageUrls'] as List).isNotEmpty) {
-            imageUrl = productData['imageUrls'][0];
-          }
+        return ListView.builder(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
+          itemCount: snapshot.data!.docs.length,
+          itemBuilder: (context, index) {
+            var productDoc = snapshot.data!.docs[index];
+            var productData = productDoc.data() as Map<String, dynamic>;
 
-          return _buildProductOffers(
-            productDoc.id, 
-            productData['name'] ?? '', 
-            imageUrl
-          );
-        },
-      );
-    },
-  );
-}
+            String? imageUrl;
+            if (productData.containsKey('imageUrls') && productData['imageUrls'] != null && (productData['imageUrls'] as List).isNotEmpty) {
+              imageUrl = productData['imageUrls'][0];
+            }
 
+            return _buildProductOffers(
+              productDoc.id,
+              productData['name'] ?? '',
+              imageUrl
+            );
+          },
+        );
+      },
+    );
+  }
 
   Widget _buildProductOffers(String productId, String name, String? imageUrl) {
     return FutureBuilder<QuerySnapshot>(
@@ -232,7 +230,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
             leading: ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: imageUrl != null
-                  ? Image.network(imageUrl, width: 45, height: 45, fit: BoxFit.cover) // ✅ تم تصحيح السطر هنا
+                  ? Image.network(imageUrl, width: 45, height: 45, fit: BoxFit.cover)
                   : const Icon(Icons.shopping_bag, color: Colors.grey),
             ),
             title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
@@ -270,7 +268,8 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
     );
   }
 
-  Widget _buildQtyControl(String id, {required bool isInsideModal}) {
+  // 💡 إضافة StateSetter لتحديث واجهة السلة (Modal) عند الضغط
+  Widget _buildQtyControl(String id, {required bool isInsideModal, StateSetter? modalState}) {
     return Container(
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.grey.shade300)),
       child: Row(
@@ -287,12 +286,18 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
                   if (isInsideModal && _demoCart.isEmpty) Navigator.pop(context);
                 }
               });
+              if (modalState != null) modalState(() {}); // تحديث السلة
             },
           ),
           Text("${_demoCart[id]!['qty']}", style: const TextStyle(fontWeight: FontWeight.bold)),
           IconButton(
             icon: const Icon(Icons.add, color: Colors.green, size: 18),
-            onPressed: () => setState(() => _demoCart[id]!['qty']++),
+            onPressed: () {
+              setState(() {
+                _demoCart[id]!['qty']++;
+              });
+              if (modalState != null) modalState(() {}); // تحديث السلة
+            },
           ),
         ],
       ),
@@ -309,33 +314,48 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
           textDirection: TextDirection.rtl,
           child: Container(
             padding: const EdgeInsets.all(20),
-            decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))),
-                const SizedBox(height: 10),
-                const Text("سلة العرض المؤقتة", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const Divider(),
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: _demoCart.keys.map((id) {
-                      final item = _demoCart[id]!;
-                      return ListTile(
-                        title: Text(item['name'], style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                        subtitle: Text("${item['price']} ج.م"),
-                        trailing: _buildQtyControl(id, isInsideModal: true),
-                      );
-                    }).toList(),
+            decoration: const BoxDecoration(
+              color: Colors.white, 
+              borderRadius: BorderRadius.vertical(top: Radius.circular(25))
+            ),
+            child: SafeArea( // 🔥 مساحة آمنة لضبط السلة في شاشات الموبايل الحديثة
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))),
+                  const SizedBox(height: 10),
+                  const Text("سلة العرض المؤقتة", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Divider(),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: _demoCart.keys.map((id) {
+                        final item = _demoCart[id]!;
+                        return ListTile(
+                          title: Text(item['name'], style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                          subtitle: Text("${item['price']} ج.م"),
+                          trailing: _buildQtyControl(id, isInsideModal: true, modalState: setModalState), // مررنا الستيت هنا
+                        );
+                      }).toList(),
+                    ),
                   ),
-                ),
-                const Divider(),
-                Text("الإجمالي: ${_calculateTotal()} ج.م", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF43B97F))),
-                const SizedBox(height: 20),
-                SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text("إغلاق"))),
-              ],
+                  const Divider(),
+                  Text(
+                    "الإجمالي: ${_calculateTotal().toStringAsFixed(2)} ج.م", 
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF43B97F))
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity, 
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context), 
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF43B97F)),
+                      child: const Text("إغلاق", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                    )
+                  ),
+                ],
+              ),
             ),
           ),
         ),
