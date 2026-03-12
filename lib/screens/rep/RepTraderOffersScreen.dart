@@ -78,20 +78,12 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
                     itemBuilder: (context, index) {
                       var offer = offers[index].data() as Map<String, dynamic>;
                       String oId = offers[index].id;
+                      String? productId = offer['productId']; // 💡 مفتاح الربط مع المنتج الأصلي
 
-                      // 💡 استخدام نفس منطق ملف المنتجات لجلب الصور بنجاح
-                      String? finalImageUrl;
-                      if (offer.containsKey('imageUrls') && offer['imageUrls'] != null && (offer['imageUrls'] as List).isNotEmpty) {
-                        finalImageUrl = offer['imageUrls'][0];
-                      } else if (offer['imageUrl'] != null && offer['imageUrl'].toString().isNotEmpty) {
-                        finalImageUrl = offer['imageUrl'];
-                      }
-
-                      // استخراج السعر من مصفوفة الوحدات
+                      // استخراج السعر والوحدات
                       List units = offer['units'] ?? [];
                       double price = 0.0;
                       String unitName = "قطعة";
-
                       if (units.isNotEmpty) {
                         price = (units[0]['price'] ?? 0.0).toDouble();
                         unitName = units[0]['unitName'] ?? "وحدة";
@@ -99,62 +91,81 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
 
                       int qty = _demoCart[oId] ?? 0;
 
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.all(12),
-                          leading: Container(
-                            width: 60, height: 60,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: Colors.grey.shade100),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: (finalImageUrl != null && finalImageUrl.toString().startsWith('http'))
-                                  ? Image.network(
-                                      finalImageUrl, 
-                                      fit: BoxFit.cover, // بيملا المربع زي ملف المنتجات
-                                      errorBuilder: (context, error, stackTrace) => 
-                                          const Icon(Icons.broken_image_outlined, color: Colors.grey),
-                                    )
-                                  : const Icon(Icons.shopping_bag_outlined, color: Colors.grey),
-                            ),
-                          ),
-                          title: Text(offer['productName'] ?? 'عرض بدون اسم',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text("سعر ال$unitName", style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                              Text("${price.toStringAsFixed(2)} ج.م",
-                                  style: const TextStyle(color: Color(0xFF43B97F), fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (qty > 0) ...[
-                                _cartButton(Icons.remove, () => _updateCart(oId, price, -1)),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                                  child: Text("$qty", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      // 🛠️ استخدام FutureBuilder لجلب الصورة من مجموعة المنتجات الأصلية
+                      return FutureBuilder<DocumentSnapshot>(
+                        future: productId != null 
+                            ? _db.collection('products').doc(productId).get() 
+                            : null,
+                        builder: (context, prodSnapshot) {
+                          String? finalImageUrl;
+                          
+                          // محاولة جلب الصورة من بيانات المنتج الأصلي
+                          if (prodSnapshot.hasData && prodSnapshot.data!.exists) {
+                            var prodData = prodSnapshot.data!.data() as Map<String, dynamic>;
+                            if (prodData.containsKey('imageUrls') && prodData['imageUrls'] != null && (prodData['imageUrls'] as List).isNotEmpty) {
+                              finalImageUrl = prodData['imageUrls'][0];
+                            } else if (prodData['imageUrl'] != null) {
+                              finalImageUrl = prodData['imageUrl'];
+                            }
+                          }
+
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.all(12),
+                              leading: Container(
+                                width: 60, height: 60,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: Colors.grey.shade100),
                                 ),
-                              ],
-                              _cartButton(Icons.add, () => _updateCart(oId, price, 1)),
-                            ],
-                          ),
-                        ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: (finalImageUrl != null && finalImageUrl.startsWith('http'))
+                                      ? Image.network(
+                                          finalImageUrl,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) =>
+                                              const Icon(Icons.broken_image_outlined, color: Colors.grey),
+                                        )
+                                      : const Icon(Icons.shopping_bag_outlined, color: Colors.grey),
+                                ),
+                              ),
+                              title: Text(offer['productName'] ?? 'عرض بدون اسم',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text("سعر ال$unitName", style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                  Text("${price.toStringAsFixed(2)} ج.م",
+                                      style: const TextStyle(color: Color(0xFF43B97F), fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (qty > 0) ...[
+                                    _cartButton(Icons.remove, () => _updateCart(oId, price, -1)),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                                      child: Text("$qty", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                    ),
+                                  ],
+                                  _cartButton(Icons.add, () => _updateCart(oId, price, 1)),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
                       );
                     },
                   );
-                }, 
+                },
               ),
             ),
-            // 🔥 استخدام SafeArea هنا لرفع السلة عن أزرار التنقل السفلية للموبايل
-            if (_demoCart.isNotEmpty) 
+            if (_demoCart.isNotEmpty)
               SafeArea(
                 top: false,
                 child: _buildCartSummary(),
@@ -217,3 +228,4 @@ class _RepTraderOffersScreenState extends State<RepTraderOffersScreen> {
     );
   }
 }
+
