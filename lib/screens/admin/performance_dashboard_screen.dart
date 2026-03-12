@@ -30,7 +30,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
   int totalOrders = 0;
   int activeCustomers = 0;
   double workingHours = 0;
-  int executedVisits = 0; // حقل الزيارات الجديد
+  int executedVisits = 0;
   Map<String, dynamic> targets = {};
 
   @override
@@ -46,7 +46,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     try {
       List<String> codesToQuery = [];
 
-      // 1. تحديد الـ repCodes المطلوبة
+      // 1. تحديد الـ repCodes المستهدفة
       if (widget.targetType == 'sales_supervisor') {
         var reps = await FirebaseFirestore.instance
             .collection('salesRep')
@@ -63,7 +63,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       }
 
       if (codesToQuery.isNotEmpty) {
-        // 2. جلب الأوردرات والمبيعات
+        // 2. جلب الأوردرات
         var orders = await FirebaseFirestore.instance
             .collection('orders')
             .where('buyer.repCode', whereIn: codesToQuery)
@@ -78,7 +78,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
           if (doc['buyer']?['id'] != null) buyersSet.add(doc['buyer']['id']);
         }
 
-        // 3. جلب الزيارات المنفذة (من كولكشن visits)
+        // 3. جلب الزيارات
         var visits = await FirebaseFirestore.instance
             .collection('visits')
             .where('repCode', whereIn: codesToQuery)
@@ -86,8 +86,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
             .where('timestamp', isLessThanOrEqualTo: Timestamp.fromDate(_endDate.add(const Duration(days: 1))))
             .get();
 
-        // 4. جلب ساعات العمل (daily_logs)
-        // ملاحظة: الـ daily_logs تستخدم repCode المندوب الفردي غالباً
+        // 4. جلب ساعات العمل
         var logs = await FirebaseFirestore.instance
             .collection('daily_logs')
             .where('repCode', whereIn: codesToQuery)
@@ -124,31 +123,37 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
   @override
   Widget build(BuildContext context) {
     String currentMonth = DateFormat('yyyy-MM').format(_startDate);
-    var currentTarget = targets[currentMonth] ?? {};
+    // تأمين جلب الهدف لتجنب أخطاء الـ null
+    var currentTarget = targets[currentMonth] is Map ? targets[currentMonth] : {};
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
-        title: Text("أداء ${widget.targetName}", style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold)),
-        elevation: 0,
+        title: Text("أداء ${widget.targetName}", 
+            style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
+        elevation: 0.5,
         backgroundColor: Colors.white,
         foregroundColor: const Color(0xFF2F3542),
         centerTitle: true,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF1ABC9C)))
-          : SingleChildScrollView(
-              padding: EdgeInsets.all(12.sp),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildDateFilter(),
-                  SizedBox(height: 3.h),
-                  Text("مؤشرات الأداء الرئيسية (KPIs)",
-                      style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
-                  SizedBox(height: 2.h),
-                  _buildKpiGrid(currentTarget),
-                ],
+          : RefreshIndicator(
+              onRefresh: _fetchData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.all(15.sp),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildDateFilter(),
+                    SizedBox(height: 4.h),
+                    Text("مؤشرات الأداء الرئيسية (KPIs)",
+                        style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                    SizedBox(height: 2.h),
+                    _buildKpiGrid(currentTarget),
+                  ],
+                ),
               ),
             ),
     );
@@ -156,7 +161,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
 
   Widget _buildDateFilter() {
     return Container(
-      padding: EdgeInsets.all(12.sp),
+      padding: EdgeInsets.all(15.sp),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
@@ -171,7 +176,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
               _fetchData();
             }
           }),
-          Container(width: 1, height: 30, color: Colors.grey[200]),
+          Container(width: 1, height: 40, color: Colors.grey[200]),
           _dateTile("إلى تاريخ", _endDate, (date) {
             if (date != null) {
               setState(() => _endDate = date);
@@ -180,8 +185,9 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
           }),
           CircleAvatar(
             backgroundColor: const Color(0xFF1ABC9C).withOpacity(0.1),
+            radius: 20.sp,
             child: IconButton(
-              icon: Icon(Icons.refresh, color: const Color(0xFF1ABC9C), size: 15.sp),
+              icon: Icon(Icons.refresh, color: const Color(0xFF1ABC9C), size: 18.sp),
               onPressed: _fetchData,
             ),
           )
@@ -204,25 +210,26 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(fontSize: 9.sp, color: Colors.grey)),
+          Text(label, style: TextStyle(fontSize: 11.sp, color: Colors.grey[600])),
           Text(DateFormat('yyyy-MM-dd').format(date),
-              style: TextStyle(fontSize: 10.sp, fontWeight: FontWeight.bold, color: const Color(0xFF2F3542))),
+              style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.bold, color: const Color(0xFF2F3542))),
         ],
       ),
     );
   }
 
-  Widget _buildKpiGrid(Map<String, dynamic> currentTarget) {
-    double financialGoal = (currentTarget['financialTarget'] ?? 0).toDouble();
-    double visitsGoal = (currentTarget['visitsTarget'] ?? 0).toDouble();
+  Widget _buildKpiGrid(Map<dynamic, dynamic> currentTarget) {
+    // تأمين استخراج القيم المضافة للأهداف
+    double financialGoal = double.tryParse(currentTarget['financialTarget']?.toString() ?? '0') ?? 0;
+    double visitsGoal = double.tryParse(currentTarget['visitsTarget']?.toString() ?? '0') ?? 0;
 
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       crossAxisCount: 2,
-      mainAxisSpacing: 12.sp,
-      crossAxisSpacing: 12.sp,
-      childAspectRatio: 0.85, // تعديل بسيط ليتناسب مع الخط الكبير
+      mainAxisSpacing: 15.sp,
+      crossAxisSpacing: 15.sp,
+      childAspectRatio: 0.82, 
       children: [
         _kpiCard("إجمالي المبيعات", totalSales, financialGoal, isCurrency: true),
         _kpiCard("الزيارات المنفذة", executedVisits.toDouble(), visitsGoal, unit: "زيارة"),
@@ -234,21 +241,24 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
   }
 
   Widget _kpiCard(String title, double actual, double goal, {bool isCurrency = false, String unit = ''}) {
+    // حماية من القسمة على صفر (تأمين جوجل)
     double percentage = (goal > 0) ? (actual / goal) : 0;
     double displayProgress = percentage > 1 ? 1.0 : percentage;
 
     return Container(
-      padding: EdgeInsets.all(12.sp),
+      padding: EdgeInsets.all(15.sp),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 5))],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 15, offset: const Offset(0, 5))],
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(title, style: TextStyle(fontSize: 10.sp, color: Colors.blueGrey, fontWeight: FontWeight.w500)),
-          SizedBox(height: 8.sp),
+          Text(title, 
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11.sp, color: Colors.blueGrey, fontWeight: FontWeight.bold)),
+          SizedBox(height: 10.sp),
           FittedBox(
             child: Text(
               isCurrency ? "${NumberFormat("#,###").format(actual)} ج.م" : "${actual.toStringAsFixed(1)} $unit",
@@ -260,24 +270,27 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text("الهدف: ${goal.toInt()}", style: TextStyle(fontSize: 8.sp, color: Colors.grey)),
+                Text("الهدف: ${goal.toInt()}", style: TextStyle(fontSize: 9.sp, color: Colors.grey[600])),
                 Text("${(percentage * 100).toInt()}%",
                     style: TextStyle(
-                        fontSize: 9.sp,
+                        fontSize: 10.sp,
                         fontWeight: FontWeight.bold,
                         color: percentage >= 1 ? Colors.green : Colors.orange)),
               ],
             ),
-            SizedBox(height: 5.sp),
+            SizedBox(height: 8.sp),
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: LinearProgressIndicator(
                 value: displayProgress,
                 backgroundColor: Colors.grey[100],
                 valueColor: AlwaysStoppedAnimation<Color>(percentage >= 1 ? Colors.green : const Color(0xFF1ABC9C)),
-                minHeight: 6.sp,
+                minHeight: 8.sp,
               ),
             ),
+          ] else ...[
+            const Spacer(),
+            Text("لا يوجد هدف محدد", style: TextStyle(fontSize: 9.sp, color: Colors.grey[400])),
           ]
         ],
       ),

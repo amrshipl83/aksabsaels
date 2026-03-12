@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sizer/sizer.dart';
 import 'dart:convert';
+import 'package:url_launcher/url_launcher.dart'; // مكتبة فتح الروابط
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -29,6 +30,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  // دالة لفتح رابط الخصوصية
+  Future<void> _launchUrl() async {
+    final Uri url = Uri.parse('https://aksab.shop/privacy-policy'); // يفضل وضع الرابط الكامل للسياسة
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      throw Exception('Could not launch $url');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -44,21 +53,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
         padding: EdgeInsets.all(5.w),
         child: Column(
           children: [
-            // قسم البيانات الأساسية
             _buildProfileHeader(),
             SizedBox(height: 4.h),
             
-            // قسم الخصوصية (شرط جوجل)
             _buildSectionTitle("الأمان والخصوصية"),
-            _buildMenuCard(Icons.privacy_tip_outlined, "سياسة الخصوصية", () {
-               // هنا تضع رابط الويب الخاص بالسياسة
-            }),
             
-            // قسم حذف الحساب (شرط جوجل الإجباري)
+            // تعديل رابط الخصوصية
+            _buildMenuCard(Icons.privacy_tip_outlined, "سياسة الخصوصية", () {
+              _launchUrl();
+            }),
+
+            // زر حذف الحساب المتوافق مع شروط جوجل
             _buildMenuCard(Icons.delete_forever_outlined, "حذف الحساب نهائياً", () {
               _showDeleteDialog();
             }, color: Colors.redAccent),
-
+            
             SizedBox(height: 5.h),
             Text("إصدار التطبيق 1.0.0", style: TextStyle(color: Colors.grey, fontSize: 10.sp)),
           ],
@@ -84,10 +93,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Icon(Icons.person, size: 15.w, color: const Color(0xFF1ABC9C)),
           ),
           SizedBox(height: 2.h),
-          Text(_userData?['fullname'] ?? "جاري التحميل...", 
-            style: TextStyle(fontSize: 17.sp, fontWeight: FontWeight.w900)),
-          Text(_userData?['role'] == 'sales_manager' ? "مدير مبيعات" : "مشرف مبيعات", 
-            style: TextStyle(fontSize: 12.sp, color: Colors.grey)),
+          Text(_userData?['fullname'] ?? "جاري التحميل...",
+              style: TextStyle(fontSize: 17.sp, fontWeight: FontWeight.w900)),
+          Text(_userData?['role'] == 'sales_manager' ? "مدير مبيعات" : "مشرف مبيعات",
+              style: TextStyle(fontSize: 12.sp, color: Colors.grey)),
         ],
       ),
     );
@@ -124,17 +133,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("حذف الحساب"),
-        content: const Text("هل أنت متأكد من رغبتك في حذف الحساب؟ سيتم مسح جميع بياناتك نهائياً من النظام وفقاً لسياسات جوجل."),
+        title: const Text("تأكيد حذف الحساب"),
+        content: const Text(
+          "تحذير: هذا الإجراء سيقوم بحذف حسابك نهائياً من سجلاتنا. لن تتمكن من استعادة بياناتك مرة أخرى. هل أنت متأكد؟",
+          textAlign: TextAlign.right,
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("إلغاء")),
           TextButton(
-            onPressed: () {
-              // هنا نضع كود المسح الفعلي من Firebase
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم إرسال طلب حذف الحساب")));
-            }, 
-            child: const Text("تأكيد الحذف", style: TextStyle(color: Colors.red))
+            onPressed: () => Navigator.pop(context),
+            child: const Text("إلغاء"),
+          ),
+          TextButton(
+            onPressed: () async {
+              // 1. مسح البيانات من Firestore (حسب منطق تطبيقك)
+              try {
+                String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+                if (uid.isNotEmpty) {
+                  await FirebaseFirestore.instance.collection('users').doc(uid).delete();
+                  await FirebaseAuth.instance.currentUser?.delete();
+                }
+                
+                // 2. مسح البيانات المحلية
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.clear();
+
+                Navigator.pop(context);
+                // 3. التوجيه لصفحة تسجيل الدخول
+                Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+                
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("يجب تسجيل الخروج والدخول مرة أخرى للقيام بهذه العملية (لدواعي أمنية)"))
+                );
+              }
+            },
+            child: const Text("تأكيد الحذف النهائي", style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
