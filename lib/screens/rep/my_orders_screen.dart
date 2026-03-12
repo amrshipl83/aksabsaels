@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart' as intl;
-import 'package:url_launcher/url_launcher.dart'; // تأكد من إضافة url_launcher في pubspec.yaml
+import 'package:url_launcher/url_launcher.dart';
 
 class MyOrdersScreen extends StatefulWidget {
   const MyOrdersScreen({super.key});
@@ -17,15 +17,13 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
   bool _isLoading = true;
   bool _isMoreLoading = false;
   bool _hasMore = true;
-  DocumentSnapshot? _lastDocument; // لتخزين آخر وثيقة للتحميل التالي
+  DocumentSnapshot? _lastDocument;
   
   List<Map<String, dynamic>> _allOrders = [];
   Map<String, dynamic>? _userData;
-  String? _indexErrorUrl; // لتخزين رابط الإندكس لو وجد
+  String? _indexErrorUrl;
 
   final TextEditingController _searchController = TextEditingController();
-  DateTime? _startDate;
-  DateTime? _endDate;
   String _selectedStatus = "";
 
   final Map<String, String> _statusMap = {
@@ -43,7 +41,6 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     _loadOrders(isRefresh: true);
   }
 
-  // دالة جلب البيانات الذكية
   Future<void> _loadOrders({bool isRefresh = false}) async {
     if (isRefresh) {
       setState(() {
@@ -64,17 +61,14 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       _userData = jsonDecode(userDataString);
       final String repCode = _userData!['repCode'];
 
-      // بناء الاستعلام
       Query query = _db.collection("orders")
           .where("buyer.repCode", isEqualTo: repCode)
           .orderBy("orderDate", descending: true);
 
-      // تطبيق فلترة الحالة مباشرة في الـ Query لو مختارة
       if (_selectedStatus.isNotEmpty) {
         query = query.where("status", isEqualTo: _selectedStatus);
       }
 
-      // Pagination
       if (_lastDocument != null) {
         query = query.startAfterDocument(_lastDocument!);
       }
@@ -113,7 +107,6 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
   void _handleError(dynamic e) {
     String errorMsg = e.toString();
     if (errorMsg.contains("FAILED_PRECONDITION") || errorMsg.contains("index")) {
-      // استخراج الرابط من الخطأ
       RegExp regExp = RegExp(r'https://console\.firebase\.google\.com[^\s]+');
       _indexErrorUrl = regExp.stringMatch(errorMsg);
     }
@@ -130,7 +123,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text("مبيعاتي", style: TextStyle(fontWeight: FontWeight.bold)),
+          title: const Text("مبيعاتي (المندوب)", style: TextStyle(fontWeight: FontWeight.bold)),
           backgroundColor: const Color(0xFF43B97F),
           foregroundColor: Colors.white,
           centerTitle: true,
@@ -180,11 +173,38 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       decoration: BoxDecoration(color: Colors.orange.withOpacity(0.2), borderRadius: BorderRadius.circular(10)),
       child: Column(
         children: [
-          const Text("يجب تفعيل 'الفهرسة' في فايربيز لتشغيل الفلاتر المتقدمة", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          const Text("يجب تفعيل 'الفهرسة' لتشغيل الفلاتر المتقدمة", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
           TextButton.icon(
             onPressed: () => launchUrl(Uri.parse(_indexErrorUrl!)),
             icon: const Icon(Icons.settings_input_component),
-            label: const Text("اضغط هنا لتفعيل الإندكس"),
+            label: const Text("تفعيل الإندكس الآن"),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterSection() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
+      child: Row(
+        children: [
+          Expanded(
+            child: DropdownButtonFormField<String>(
+              value: _selectedStatus,
+              items: _statusMap.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, style: const TextStyle(fontSize: 13)))).toList(),
+              onChanged: (val) {
+                setState(() => _selectedStatus = val!);
+                _loadOrders(isRefresh: true);
+              },
+              decoration: const InputDecoration(labelText: "حالة الطلب", contentPadding: EdgeInsets.symmetric(horizontal: 10), border: OutlineInputBorder()),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.blueGrey),
+            onPressed: () => _loadOrders(isRefresh: true),
           )
         ],
       ),
@@ -199,7 +219,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
           : ElevatedButton(
               onPressed: () => _loadOrders(),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black87),
-              child: const Text("عرض المزيد من الطلبات"),
+              child: const Text("عرض المزيد"),
             ),
     );
   }
@@ -207,6 +227,9 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
   Widget _buildOrderCard(Map<String, dynamic> order) {
     bool isDelivered = order['status'] == 'delivered';
     Color statusColor = isDelivered ? Colors.green : (order['status'] == 'cancelled' ? Colors.red : Colors.orange);
+    String dateStr = order['orderDate'] != null
+        ? intl.DateFormat('yyyy-MM-dd').format((order['orderDate'] as Timestamp).toDate())
+        : "غير متوفر";
 
     return Card(
       elevation: 2,
@@ -234,6 +257,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
           children: [
             const SizedBox(height: 5),
             Text("العميل: ${order['buyer']?['name'] ?? 'غير معروف'}"),
+            Text("التاريخ: $dateStr"),
             const SizedBox(height: 5),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -247,36 +271,66 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     );
   }
 
-  // --- Filter Section ---
-  Widget _buildFilterSection() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      margin: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
+  void _showOrderDetails(Map<String, dynamic> order) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.7,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (_, controller) {
+            return Directionality(
+              textDirection: TextDirection.rtl,
+              child: ListView(
+                controller: controller,
+                padding: const EdgeInsets.all(20),
+                children: [
+                  Center(child: Container(width: 50, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)))),
+                  const SizedBox(height: 20),
+                  Text("تفاصيل الطلب: ${order['id']}", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF43B97F))),
+                  const Divider(),
+                  _detailRow("العميل", order['buyer']?['name']),
+                  _detailRow("الهاتف", order['buyer']?['phone']),
+                  _detailRow("العنوان", order['buyer']?['address']),
+                  _detailRow("الحالة", _statusMap[order['status']] ?? order['status']),
+                  _detailRow("الإجمالي", "${order['total']} ج.م"),
+                  const SizedBox(height: 20),
+                  const Text("المنتجات:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 10),
+                  ...(order['items'] as List? ?? []).map((item) => Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8)),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(child: Text("${item['name']}")),
+                        Text("الكمية: ${item['quantity']} | ${item['price']} ج.م"),
+                      ],
+                    ),
+                  )).toList(),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _detailRow(String label, dynamic value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         children: [
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              value: _selectedStatus,
-              items: _statusMap.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, style: const TextStyle(fontSize: 13)))).toList(),
-              onChanged: (val) {
-                setState(() => _selectedStatus = val!);
-                _loadOrders(isRefresh: true); // تحميل من جديد بفلترة السيرفر
-              },
-              decoration: const InputDecoration(labelText: "حالة الطلب", contentPadding: EdgeInsets.symmetric(horizontal: 10), border: OutlineInputBorder()),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.blueGrey),
-            onPressed: () => _loadOrders(isRefresh: true),
-          )
+          Text("$label: ", style: const TextStyle(fontWeight: FontWeight.bold)),
+          Expanded(child: Text("${value ?? 'غير متوفر'}")),
         ],
       ),
     );
   }
-
-  // (باقي دوال التفاصيل _showOrderDetails و _detailRow تبقى كما هي في الكود الأصلي)
-  void _showOrderDetails(Map<String, dynamic> order) { /* ... نفس الكود السابق ... */ }
-  Widget _detailRow(String label, dynamic value) { /* ... نفس الكود السابق ... */ }
 }
 
