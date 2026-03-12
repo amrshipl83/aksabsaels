@@ -177,14 +177,115 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
   }
 
   Widget _buildTraderCard(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return Card(
-      child: ListTile(
-        title: Text(data['name'] ?? 'تاجر'),
-        subtitle: Text(data['businessType'] ?? ''),
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => RepTraderOffersScreen(sellerId: doc.id, sellerName: data['name'] ?? 'تاجر'))),
-      ),
-    );
-  }
-}
+  final data = doc.data() as Map<String, dynamic>;
+  
+  // استخراج الحقول المطلوبة
+  final String name = data['merchantName'] ?? data['name'] ?? 'تاجر غير مسمى';
+  final String? logo = data['logoUrl'] ?? data['merchantLogoUrl'];
+  final String type = data['businessType'] ?? 'أخرى';
+  final double minOrder = (data['minOrderTotal'] ?? 0.0).toDouble();
+  final String address = data['address'] ?? 'العنوان غير محدد';
 
+  return Card(
+    margin: const EdgeInsets.only(bottom: 12),
+    elevation: 2,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(15),
+      onTap: () => Navigator.push(
+        context, 
+        MaterialPageRoute(
+          builder: (context) => RepTraderOffersScreen(
+            sellerId: doc.id, 
+            sellerName: name
+          )
+        )
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Row(
+          children: [
+            // اللوجو الخاص بالتاجر
+            Container(
+              width: 70,
+              height: 70,
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: (logo != null && logo.isNotEmpty)
+                    ? Image.network(
+                        logo,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => 
+                            const Icon(Icons.store, size: 40, color: Colors.grey),
+                      )
+                    : const Icon(Icons.store, size: 40, color: Colors.grey),
+              ),
+            ),
+            const SizedBox(width: 15),
+            
+            // بيانات التاجر
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.category_outlined, size: 14, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      Text(type, style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.location_on_outlined, size: 14, color: Colors.green),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          address, 
+                          style: const TextStyle(fontSize: 12, color: Colors.black54),
+                          maxLines: 1, 
+                          overflow: TextOverflow.ellipsis
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            
+            // الحد الأدنى للطلب
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                const Text("أقل طلب", style: TextStyle(fontSize: 10, color: Colors.grey)),
+                Text(
+                  "$minOrder ج.م",
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold, 
+                    color: Color(0xFF43B97F),
+                    fontSize: 13
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
