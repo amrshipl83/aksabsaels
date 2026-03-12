@@ -24,8 +24,6 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   double totalSales = 0.0;
   Map<String, double> salesByStatus = {};
   Map<String, int> ordersCountByStatus = {};
-
-  // الفلتر الافتراضي: الشهر الحالي
   String _selectedFilter = 'month';
 
   @override
@@ -46,6 +44,7 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   Future<void> _fetchOrders() async {
     setState(() => _isLoading = true);
     try {
+      // جلب البيانات الأساسية للمندوب
       final snapshot = await FirebaseFirestore.instance
           .collection('orders')
           .where('buyer.repCode', isEqualTo: repData!['repCode'])
@@ -54,15 +53,19 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
       double tempTotal = 0;
       Map<String, double> tempStatusSales = {};
       Map<String, int> tempStatusCount = {};
-
       DateTime now = DateTime.now();
 
       for (var doc in snapshot.docs) {
         var data = doc.data();
         DateTime? orderDate;
 
-        if (data['createdAt'] != null && data['createdAt'] is Timestamp) {
-          orderDate = (data['createdAt'] as Timestamp).toDate();
+        // محاولة استخراج التاريخ بأمان
+        if (data['createdAt'] != null) {
+          if (data['createdAt'] is Timestamp) {
+            orderDate = (data['createdAt'] as Timestamp).toDate();
+          } else if (data['createdAt'] is String) {
+            orderDate = DateTime.tryParse(data['createdAt']);
+          }
         }
 
         bool matchesFilter = true;
@@ -73,18 +76,21 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
                   orderDate.month == now.month &&
                   orderDate.day == now.day;
             } else if (_selectedFilter == 'month') {
-              // تم تعديل المقارنة لضمان الدقة في فلتر الشهر
               matchesFilter = orderDate.year == now.year && orderDate.month == now.month;
             }
           } else {
+            // لو مفيش تاريخ، يظهر فقط في "الكل"
             matchesFilter = false;
           }
         }
 
         if (matchesFilter) {
-          double orderTotal = (data['total'] ?? 0).toDouble();
+          double orderTotal = 0.0;
+          if (data['total'] != null) {
+            orderTotal = double.tryParse(data['total'].toString()) ?? 0.0;
+          }
+          
           String status = data['status'] ?? 'جديد';
-
           tempTotal += orderTotal;
           tempStatusSales[status] = (tempStatusSales[status] ?? 0) + orderTotal;
           tempStatusCount[status] = (tempStatusCount[status] ?? 0) + 1;
@@ -119,7 +125,7 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text('اكسب - تقرير أداء المندوب',
+                  pw.Text('تقارير رابية أحلى - المندوب',
                       style: pw.TextStyle(font: boldFont, fontSize: 18, color: PdfColors.green)),
                   pw.Text(DateTime.now().toString().substring(0, 10),
                       style: pw.TextStyle(font: font, fontSize: 12)),
@@ -127,10 +133,8 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
               ),
               pw.Divider(thickness: 2, color: PdfColors.grey300),
               pw.SizedBox(height: 20),
-              pw.Text('اسم المندوب: ${repData?['fullname']}',
-                  style: pw.TextStyle(font: font, fontSize: 14)),
-              pw.Text('كود المندوب: ${repData?['repCode']}',
-                  style: pw.TextStyle(font: font, fontSize: 14)),
+              pw.Text('اسم المندوب: ${repData?['fullname']}', style: pw.TextStyle(font: font, fontSize: 14)),
+              pw.Text('كود المندوب: ${repData?['repCode']}', style: pw.TextStyle(font: font, fontSize: 14)),
               pw.SizedBox(height: 20),
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
@@ -138,17 +142,14 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text('إجمالي مبيعات الفترة:',
-                        style: pw.TextStyle(font: boldFont, fontSize: 16)),
+                    pw.Text('إجمالي مبيعات الفترة:', style: pw.TextStyle(font: boldFont, fontSize: 16)),
                     pw.Text('${totalSales.toStringAsFixed(2)} ج.م',
-                        style: pw.TextStyle(
-                            font: boldFont, fontSize: 16, color: PdfColors.green)),
+                        style: pw.TextStyle(font: boldFont, fontSize: 16, color: PdfColors.green)),
                   ],
                 ),
               ),
               pw.SizedBox(height: 30),
-              pw.Text('تفصيل المبيعات حسب الحالة:',
-                  style: pw.TextStyle(font: boldFont, fontSize: 14)),
+              pw.Text('تفصيل المبيعات حسب الحالة:', style: pw.TextStyle(font: boldFont, fontSize: 14)),
               pw.SizedBox(height: 10),
               pw.TableHelper.fromTextArray(
                 cellStyle: pw.TextStyle(font: font),
@@ -191,7 +192,6 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
             )
           ],
         ),
-        // ✅ إضافة SafeArea هنا لحماية المحتوى من أزرار الهاتف
         body: SafeArea(
           child: Column(
             children: [
@@ -199,19 +199,23 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
               Expanded(
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator(color: kPrimaryColor))
-                    : SingleChildScrollView(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            _buildTotalCard(),
-                            const SizedBox(height: 20),
-                            if (salesByStatus.isNotEmpty) ...[
-                              _buildStatusChartSection(),
+                    : RefreshIndicator(
+                        onRefresh: _fetchOrders,
+                        child: SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              _buildTotalCard(),
                               const SizedBox(height: 20),
-                              _buildStatusTable(),
-                            ] else
-                              _buildNoDataState(),
-                          ],
+                              if (salesByStatus.isNotEmpty) ...[
+                                _buildStatusChartSection(),
+                                const SizedBox(height: 20),
+                                _buildStatusTable(),
+                              ] else
+                                _buildNoDataState(),
+                            ],
+                          ),
                         ),
                       ),
               ),
@@ -241,7 +245,9 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
     bool isSelected = _selectedFilter == value;
     return GestureDetector(
       onTap: () {
-        setState(() => _selectedFilter = value);
+        setState(() {
+          _selectedFilter = value;
+        });
         _fetchOrders();
       },
       child: Container(
@@ -285,13 +291,14 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
       child: Column(
         children: [
-          const Text('توزيع الحالات',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const Text('توزيع الحالات', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 20),
           SizedBox(
             height: 180,
             child: PieChart(
               PieChartData(
+                sectionsSpace: 2,
+                centerSpaceRadius: 40,
                 sections: salesByStatus.entries.map((entry) {
                   return PieChartSectionData(
                     value: entry.value,
@@ -299,7 +306,7 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
                     titleStyle: const TextStyle(
                         color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                     color: _getStatusColor(entry.key),
-                    radius: 55,
+                    radius: 50,
                   );
                 }).toList(),
               ),
@@ -336,13 +343,22 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   }
 
   Widget _buildNoDataState() {
-    return const Padding(
-      padding: EdgeInsets.only(top: 50),
+    return Padding(
+      padding: const EdgeInsets.only(top: 50),
       child: Column(
         children: [
-          Icon(Icons.insert_chart_outlined, size: 80, color: Colors.grey),
-          SizedBox(height: 10),
-          Text("لا توجد مبيعات مسجلة لهذه الفترة", style: TextStyle(color: Colors.grey)),
+          const Icon(Icons.insert_chart_outlined, size: 80, color: Colors.grey),
+          const SizedBox(height: 10),
+          const Text("لا توجد مبيعات مسجلة لهذه الفترة", style: TextStyle(color: Colors.grey)),
+          const SizedBox(height: 20),
+          // زر لإعادة المحاولة أو الانتقال لتبويب الكل
+          TextButton(
+            onPressed: () {
+              setState(() => _selectedFilter = 'all');
+              _fetchOrders();
+            },
+            child: const Text("عرض كل المبيعات", style: TextStyle(color: kPrimaryColor)),
+          )
         ],
       ),
     );
