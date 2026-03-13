@@ -1,4 +1,4 @@
-name: Build Flutter APK (Release)
+name: Build Flutter APK & AAB (Release)
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
       - name: 🧩 Checkout Code
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup Java (تم اختيار Zulu 17 لتوافقها العالي مع أندرويد)
+      # 2️⃣ Setup Java
       - name: ☕️ Setup Java
         uses: actions/setup-java@v4
         with:
@@ -34,7 +34,6 @@ jobs:
         run: flutter pub get
 
       # 5️⃣ فك تشفير المفتاح وإنشاء ملف الخصائص
-      # ملاحظة: تأكد من تسمية السيكرت في GitHub بـ RELEASE_KEYSTORE_BASE64
       - name: 🔑 Setup Code Signing
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -42,10 +41,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          # فك تشفير ملف الـ JKS ووضعه في مساره الصحيح
           echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > android/app/aksabsales.jks
-          
-          # إنشاء ملف key.properties اللي الـ Gradle بيدور عليه
           echo "storePassword=$STORE_PASSWORD" > android/key.properties
           echo "keyPassword=$KEY_PASSWORD" >> android/key.properties
           echo "keyAlias=$KEY_ALIAS" >> android/key.properties
@@ -55,9 +51,15 @@ jobs:
       - name: 🏗️ Build Release APK
         run: flutter build apk --release
 
-      # 7️⃣ Upload Artifacts (APK Only)
+      # 7️⃣ Build Release App Bundle (AAB) - مطلوب لجوجل بلاي
+      - name: 🏗️ Build Release AAB
+        run: flutter build appbundle --release
+
+      # 8️⃣ Upload Artifacts (APK & AAB)
       - name: 📤 Upload Release Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: aksab-sales-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: aksab-sales-builds
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
