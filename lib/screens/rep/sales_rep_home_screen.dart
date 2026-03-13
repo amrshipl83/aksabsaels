@@ -348,7 +348,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
               }),
               _drawerItem(Icons.privacy_tip_outlined, "سياسة الخصوصية", false, onTap: () async {
                 Navigator.pop(context);
-                final Uri url = Uri.parse('https://aksab.shop');
+                final Uri url = Uri.parse('https://aksab.shop/');
                 if (await canLaunchUrl(url)) {
                   await launchUrl(url, mode: LaunchMode.externalApplication);
                 }
