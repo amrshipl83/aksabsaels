@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart' as ph;
+import 'package:url_launcher/url_launcher.dart'; // مضاف لفتح سياسة الخصوصية
 import 'dart:convert';
 import 'sales_rep_dashboard.dart';
 import 'visit_screen.dart';
@@ -13,6 +14,7 @@ import 'my_customers_screen.dart';
 import 'my_orders_screen.dart';
 import 'rep_store_lite_screen.dart';
 import 'rep_reports_screen.dart';
+import 'profile_screen.dart'; // مضاف لربط صفحة الملف الشخصي
 import '../admin/offers_screen.dart';
 
 // --- الثوابت اللونية لهوية أكسب مبيعات ---
@@ -49,7 +51,6 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
   Future<void> _setupNotifications() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
     NotificationSettings settings = await messaging.getNotificationSettings();
-
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
       if (mounted) {
         bool? startRequest = await _showDisclosureDialog(
@@ -183,14 +184,13 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
   Future<void> _endDay() async {
     bool hasPermission = await _handleLocationPermission();
     if (!hasPermission) return;
-    
     setState(() => _isLoading = true);
     try {
       Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       await db.collection("daily_logs").doc(currentDayLogId).update({
         'endTime': FieldValue.serverTimestamp(),
         'status': "closed",
-        'endLocation': { // ✅ إضافة موقع نهاية اليوم لزيادة الدقة الرقابية
+        'endLocation': {
           'lat': position.latitude,
           'lng': position.longitude,
         },
@@ -310,6 +310,10 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
             Expanded(
                 child: ListView(children: [
               _drawerItem(Icons.dashboard_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
+              _drawerItem(Icons.account_circle_outlined, "حسابي والإعدادات", false, onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen()));
+              }),
               _drawerItem(Icons.storefront_outlined, "المتجر", false, onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (context) => const RepStoreLiteScreen()));
@@ -341,6 +345,13 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
               _drawerItem(Icons.bar_chart_outlined, "تقارير الإنجاز", false, onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (context) => const RepReportsScreen()));
+              }),
+              _drawerItem(Icons.privacy_tip_outlined, "سياسة الخصوصية", false, onTap: () async {
+                Navigator.pop(context);
+                final Uri url = Uri.parse('https://aksab.shop');
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                }
               }),
             ])),
             const Divider(color: Colors.white24),
