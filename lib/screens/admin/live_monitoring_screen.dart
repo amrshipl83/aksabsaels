@@ -100,7 +100,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         var repsDocs = snapshot.data!.docs;
-        if (repsDocs.isEmpty) return Center(child: Text("لا يوجد مندوبين", style: TextStyle(fontSize: 15.sp)));
+        if (repsDocs.isEmpty) return Center(child: Text("لا يوجد مندوبين مسجلين", style: TextStyle(fontSize: 15.sp)));
 
         Map<String, dynamic> repsFullData = {for (var doc in repsDocs) doc['repCode']: doc.data()};
         List<String> repCodes = repsFullData.keys.toList();
@@ -110,8 +110,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
           builder: (context, logSnapshot) {
             if (!logSnapshot.hasData) return const Center(child: CircularProgressIndicator());
             var activeLogs = logSnapshot.data!.docs;
-            
-            // السلوك اللي اتفقت عليه: لو مفيش مناديب مفيش خريطة
+
             if (activeLogs.isEmpty) return Center(child: Text("لا يوجد مندوبون نشطون حالياً", style: TextStyle(fontSize: 14.sp, color: Colors.grey)));
 
             if (_isMapView) {
@@ -132,10 +131,8 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
     );
   }
 
-  // 🔥 الخريطة المعدلة بالألوان والبيانات
   Widget _buildGoogleMapView(List<QueryDocumentSnapshot> activeLogs, Map<String, dynamic> repsFullData) {
     return StreamBuilder<QuerySnapshot>(
-      // مراقبة الزيارات النشطة لحظياً لتغيير الألوان
       stream: FirebaseFirestore.instance.collection('visits').where('status', isEqualTo: 'in_progress').snapshots(),
       builder: (context, visitSnap) {
         Set<Marker> markers = {};
@@ -149,7 +146,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
 
         for (var log in activeLogs) {
           var logData = log.data() as Map<String, dynamic>;
-          var repCode = logData['repCode'];
+          var repCode = logData['repCode']?.toString() ?? "";
           var repData = repsFullData[repCode] ?? {};
           var loc = logData['location'];
 
@@ -162,9 +159,8 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
               
               markers.add(
                 Marker(
-                  markerId: MarkerId(repCode),
+                  markerId: MarkerId("rep_$repCode"),
                   position: LatLng(lat, lng),
-                  // اللون: أزرق (In Visit) أو أصفر (Online)
                   icon: BitmapDescriptor.defaultMarkerWithHue(
                     inVisit ? BitmapDescriptor.hueAzure : BitmapDescriptor.hueYellow
                   ),
@@ -182,10 +178,12 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
         }
 
         return GoogleMap(
+          key: ValueKey(markers.length),
           initialCameraPosition: const CameraPosition(target: LatLng(31.2001, 29.9187), zoom: 12),
           markers: markers,
           myLocationButtonEnabled: true,
           myLocationEnabled: true,
+          mapType: MapType.normal,
         );
       },
     );
