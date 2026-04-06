@@ -56,8 +56,7 @@ class _VisitScreenState extends State<VisitScreen> {
       return;
     }
 
-    // 2. فحص العلامة الذكية في مستند المندوب (salesRep)
-    // نبحث عن المستند باستخدام repCode
+    // 2. فحص العلامة الذكية في مستند المندوب
     final repQuery = await FirebaseFirestore.instance
         .collection('salesRep')
         .where('repCode', isEqualTo: repCode)
@@ -69,7 +68,7 @@ class _VisitScreenState extends State<VisitScreen> {
       bool hasActiveVisit = repData['hasActiveVisit'] ?? false;
 
       if (hasActiveVisit) {
-        // 3. طالما العلامة موجودة، نبحث عن الزيارة المفتوحة في كولكشن visits
+        // 3. البحث عن الزيارة المفتوحة
         final visitQuery = await FirebaseFirestore.instance
             .collection('visits')
             .where('repCode', isEqualTo: repCode)
@@ -82,7 +81,6 @@ class _VisitScreenState extends State<VisitScreen> {
           _currentVisitId = visitDoc.id;
           _currentCustomerName = visitDoc['customerName'];
 
-          // تحديث اللوكل لضمان السرعة
           await prefs.setString('currentVisitId', _currentVisitId!);
           await prefs.setString('currentCustomerName', _currentCustomerName!);
 
@@ -90,12 +88,11 @@ class _VisitScreenState extends State<VisitScreen> {
             _isVisiting = true;
             _isLoading = false;
           });
-          return; // تم استعادة الزيارة بنجاح
+          return;
         }
       }
     }
 
-    // 4. المسار الطبيعي في حال عدم وجود زيارة معلقة
     _currentVisitId = prefs.getString('currentVisitId');
     _currentCustomerName = prefs.getString('currentCustomerName');
 
@@ -203,14 +200,18 @@ class _VisitScreenState extends State<VisitScreen> {
     setState(() => _isLoading = true);
     try {
       Position? position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      
+      // جلب بيانات العميل المختار لاستخراج العنوان
       final customer = _customers.firstWhere((doc) => doc.id == _selectedCustomerId);
       final customerName = customer['fullname'];
+      final customerAddress = (customer.data() as Map<String, dynamic>)['address'] ?? "عنوان غير مسجل";
 
       final visitData = {
         'repCode': _userData!['repCode'],
         'repName': _userData!['fullname'],
         'customerId': _selectedCustomerId,
         'customerName': customerName,
+        'customerAddress': customerAddress, // الحقل الجديد المضاف
         'startTime': FieldValue.serverTimestamp(),
         'status': "in_progress",
         'location': position != null ? {'lat': position.latitude, 'lng': position.longitude} : null,
@@ -219,7 +220,7 @@ class _VisitScreenState extends State<VisitScreen> {
       // 1. إضافة الزيارة
       final docRef = await FirebaseFirestore.instance.collection('visits').add(visitData);
 
-      // 2. 🟢 تفعيل العلامة الذكية في مستند المندوب
+      // 2. تفعيل العلامة الذكية في مستند المندوب
       final repQuery = await FirebaseFirestore.instance
           .collection('salesRep')
           .where('repCode', isEqualTo: _userData!['repCode'])
@@ -257,7 +258,7 @@ class _VisitScreenState extends State<VisitScreen> {
         'endTime': FieldValue.serverTimestamp(),
       });
 
-      // 2. 🟢 إزالة العلامة الذكية من مستند المندوب
+      // 2. إزالة العلامة الذكية من مستند المندوب
       final repQuery = await FirebaseFirestore.instance
           .collection('salesRep')
           .where('repCode', isEqualTo: _userData!['repCode'])
@@ -367,8 +368,8 @@ class _VisitScreenState extends State<VisitScreen> {
         OutlinedButton.icon(
           onPressed: () {
             Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const AddNewCustomerScreen())
+                context,
+                MaterialPageRoute(builder: (context) => const AddNewCustomerScreen())
             ).then((_) {
               if (_userData != null) {
                 _loadCustomers(_userData!['repCode']);

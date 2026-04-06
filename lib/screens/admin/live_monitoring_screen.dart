@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart'; // المكتبة الجديدة
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 class LiveMonitoringScreen extends StatefulWidget {
   const LiveMonitoringScreen({super.key});
@@ -16,7 +16,7 @@ class LiveMonitoringScreen extends StatefulWidget {
 class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
-  bool _isMapView = false; // التحكم في وضع العرض
+  bool _isMapView = false; 
   final Color kPrimaryColor = const Color(0xFF1ABC9C);
   final Color kActiveVisitColor = const Color(0xFF3498DB);
   final Color kSidebarColor = const Color(0xFF2F3542);
@@ -56,7 +56,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F6FA),
         appBar: AppBar(
-          title: Text("متابعة المندوبين لايف", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold)), // تكبير العنوان
+          title: Text("متابعة المندوبين لايف", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold)),
           backgroundColor: Colors.white,
           foregroundColor: kSidebarColor,
           elevation: 0.5,
@@ -86,7 +86,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
         builder: (context, supervisorSnap) {
           if (!supervisorSnap.hasData) return const Center(child: CircularProgressIndicator());
           List<String> supervisorIds = supervisorSnap.data!.docs.map((doc) => doc.id).toList();
-          if (supervisorIds.isEmpty) return Center(child: Text("لا يوجد مشرفين تابعين لك", style: TextStyle(fontSize: 15.sp))); // تكبير الخط
+          if (supervisorIds.isEmpty) return Center(child: Text("لا يوجد مشرفين تابعين لك", style: TextStyle(fontSize: 15.sp)));
           return _buildRepsWatcher(FirebaseFirestore.instance.collection('salesRep').where('supervisorId', whereIn: supervisorIds));
         },
       );
@@ -100,7 +100,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         var repsDocs = snapshot.data!.docs;
-        if (repsDocs.isEmpty) return Center(child: Text("لا يوجد مندوبين", style: TextStyle(fontSize: 15.sp))); // تكبير الخط
+        if (repsDocs.isEmpty) return Center(child: Text("لا يوجد مندوبين", style: TextStyle(fontSize: 15.sp)));
 
         Map<String, dynamic> repsFullData = {for (var doc in repsDocs) doc['repCode']: doc.data()};
         List<String> repCodes = repsFullData.keys.toList();
@@ -110,9 +110,8 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
           builder: (context, logSnapshot) {
             if (!logSnapshot.hasData) return const Center(child: CircularProgressIndicator());
             var activeLogs = logSnapshot.data!.docs;
-            if (activeLogs.isEmpty) return Center(child: Text("لا يوجد مندوبون نشطون حالياً", style: TextStyle(fontSize: 14.sp, color: Colors.grey))); // تكبير الخط
+            if (activeLogs.isEmpty) return Center(child: Text("لا يوجد مندوبون نشطون حالياً", style: TextStyle(fontSize: 14.sp, color: Colors.grey)));
 
-            // التبديل بين الخريطة والقائمة
             if (_isMapView) {
               return _buildGoogleMapView(activeLogs, repsFullData);
             }
@@ -131,7 +130,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
     );
   }
 
-  // فانكشن بناء الخريطة
+  // 🔥 تعديل الخريطة المطور لحل مشكلة الإحداثيات
   Widget _buildGoogleMapView(List<QueryDocumentSnapshot> activeLogs, Map<String, dynamic> repsFullData) {
     Set<Marker> markers = {};
 
@@ -140,26 +139,33 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
       var repData = repsFullData[logData['repCode']] ?? {};
       var loc = logData['location'];
 
-      if (loc != null && loc['lat'] != null && loc['lng'] != null) {
-        markers.add(
-          Marker(
-            markerId: MarkerId(logData['repCode']),
-            position: LatLng(loc['lat'], loc['lng']),
-            infoWindow: InfoWindow(
-              title: logData['repName'] ?? 'مندوب',
-              snippet: "كود: ${logData['repCode']}",
-              onTap: () => _makeCall(repData['phone']),
+      if (loc != null && loc is Map) {
+        // تحويل آمن مهما كان نوع البيانات في الفايربيز
+        double? lat = double.tryParse(loc['lat'].toString());
+        double? lng = double.tryParse(loc['lng'].toString());
+
+        if (lat != null && lng != null) {
+          markers.add(
+            Marker(
+              markerId: MarkerId(logData['repCode']),
+              position: LatLng(lat, lng),
+              infoWindow: InfoWindow(
+                title: logData['repName'] ?? 'مندوب',
+                snippet: "كود: ${logData['repCode']}",
+                onTap: () => _makeCall(repData['phone']),
+              ),
+              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
             ),
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-                // يمكنك لاحقاً تخصيص ألوان الدبابيس بناءً على حالة الزيارة
-                BitmapDescriptor.hueAzure),
-          ),
-        );
+          );
+        }
       }
     }
 
     return GoogleMap(
-      initialCameraPosition: const CameraPosition(target: LatLng(31.2001, 29.9187), zoom: 11), // سنتر الإسكندرية
+      initialCameraPosition: const CameraPosition(
+        target: LatLng(31.2001, 29.9187), // سنتر الإسكندرية
+        zoom: 12,
+      ),
       markers: markers,
       myLocationButtonEnabled: true,
       myLocationEnabled: true,
@@ -182,19 +188,19 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
           child: Column(
             children: [
               Container(
-                padding: EdgeInsets.symmetric(horizontal: 12.sp, vertical: 10.sp), // تكبير الـ padding
+                padding: EdgeInsets.symmetric(horizontal: 12.sp, vertical: 10.sp),
                 decoration: BoxDecoration(
                   color: inVisit ? kActiveVisitColor : kPrimaryColor,
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
                 ),
                 child: Row(
                   children: [
-                    IconButton(icon: Icon(Icons.phone_in_talk, color: Colors.white, size: 20.sp), onPressed: () => _makeCall(repDocData['phone'])), // تكبير الأيقونة
-                    Expanded(child: Text(logData['repName'] ?? 'مندوب', style: TextStyle(color: Colors.white, fontSize: 15.sp, fontWeight: FontWeight.bold))), // تكبير الخط
+                    IconButton(icon: Icon(Icons.phone_in_talk, color: Colors.white, size: 20.sp), onPressed: () => _makeCall(repDocData['phone'])),
+                    Expanded(child: Text(logData['repName'] ?? 'مندوب', style: TextStyle(color: Colors.white, fontSize: 15.sp, fontWeight: FontWeight.bold))),
                     Container(
                       padding: EdgeInsets.symmetric(horizontal: 10.sp, vertical: 4.sp),
                       decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(5)),
-                      child: Text(inVisit ? "في زيارة" : "متصل", style: TextStyle(color: Colors.white, fontSize: 10.sp)), // تكبير الخط
+                      child: Text(inVisit ? "في زيارة" : "متصل", style: TextStyle(color: Colors.white, fontSize: 10.sp)),
                     ),
                   ],
                 ),
@@ -208,6 +214,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
                     if (inVisit && currentVisit != null) ...[
                       const Divider(),
                       _buildInfoRow(Icons.store, "العميل", currentVisit['customerName'] ?? 'غير معروف', color: kActiveVisitColor),
+                      // 📍 هنا العنوان اللي كان بيجيب "غير مسجل"
                       _buildInfoRow(Icons.location_on_outlined, "العنوان", currentVisit['customerAddress'] ?? 'عنوان غير مسجل', color: Colors.grey[600], isSmall: true),
                     ],
                     if (_userData?['role'] == 'sales_manager') ...[
@@ -217,9 +224,9 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.support_agent, size: 16.sp, color: Colors.orange[700]), // تكبير الأيقونة
+                              Icon(Icons.support_agent, size: 16.sp, color: Colors.orange[700]),
                               SizedBox(width: 5.sp),
-                              Text("المشرف: ${repDocData['supervisorName'] ?? 'غير محدد'}", style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.bold)), // تكبير الخط
+                              Text("المشرف: ${repDocData['supervisorName'] ?? 'غير محدد'}", style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.bold)),
                             ],
                           ),
                           TextButton.icon(
@@ -227,8 +234,8 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
                               var sup = await FirebaseFirestore.instance.collection('managers').doc(repDocData['supervisorId']).get();
                               _makeCall(sup.data()?['phone']);
                             },
-                            icon: Icon(Icons.phone, size: 14.sp), // تكبير الأيقونة
-                            label: Text("اتصال", style: TextStyle(fontSize: 12.sp)), // تكبير الخط
+                            icon: Icon(Icons.phone, size: 14.sp),
+                            label: Text("اتصال", style: TextStyle(fontSize: 12.sp)),
                             style: TextButton.styleFrom(foregroundColor: Colors.orange[700], padding: EdgeInsets.zero),
                           )
                         ],
@@ -246,14 +253,14 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
 
   Widget _buildInfoRow(IconData icon, String label, String value, {Color? color, bool isSmall = false}) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4.sp), // زيادة المسافة
+      padding: EdgeInsets.symmetric(vertical: 4.sp),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: isSmall ? 13.sp : 15.sp, color: color ?? Colors.grey[600]), // تكبير الأيقونات
+          Icon(icon, size: isSmall ? 13.sp : 15.sp, color: color ?? Colors.grey[600]),
           SizedBox(width: 8.sp),
-          Text("$label: ", style: TextStyle(fontSize: isSmall ? 11.sp : 12.sp, color: Colors.grey[700])), // تكبير الخط
-          Expanded(child: Text(value, style: TextStyle(fontSize: isSmall ? 11.sp : 13.sp, fontWeight: isSmall ? FontWeight.normal : FontWeight.bold, color: color ?? kSidebarColor))), // تكبير الخط
+          Text("$label: ", style: TextStyle(fontSize: isSmall ? 11.sp : 12.sp, color: Colors.grey[700])),
+          Expanded(child: Text(value, style: TextStyle(fontSize: isSmall ? 11.sp : 13.sp, fontWeight: isSmall ? FontWeight.normal : FontWeight.bold, color: color ?? kSidebarColor))),
         ],
       ),
     );
