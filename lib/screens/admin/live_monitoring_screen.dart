@@ -16,7 +16,7 @@ class LiveMonitoringScreen extends StatefulWidget {
 class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
-  bool _isMapView = false; 
+  bool _isMapView = false;
   final Color kPrimaryColor = const Color(0xFF1ABC9C);
   final Color kActiveVisitColor = const Color(0xFF3498DB);
   final Color kSidebarColor = const Color(0xFF2F3542);
@@ -110,6 +110,8 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
           builder: (context, logSnapshot) {
             if (!logSnapshot.hasData) return const Center(child: CircularProgressIndicator());
             var activeLogs = logSnapshot.data!.docs;
+            
+            // السلوك اللي اتفقت عليه: لو مفيش مناديب مفيش خريطة
             if (activeLogs.isEmpty) return Center(child: Text("لا يوجد مندوبون نشطون حالياً", style: TextStyle(fontSize: 14.sp, color: Colors.grey)));
 
             if (_isMapView) {
@@ -130,46 +132,62 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
     );
   }
 
-  // 🔥 تعديل الخريطة المطور لحل مشكلة الإحداثيات
+  // 🔥 الخريطة المعدلة بالألوان والبيانات
   Widget _buildGoogleMapView(List<QueryDocumentSnapshot> activeLogs, Map<String, dynamic> repsFullData) {
-    Set<Marker> markers = {};
+    return StreamBuilder<QuerySnapshot>(
+      // مراقبة الزيارات النشطة لحظياً لتغيير الألوان
+      stream: FirebaseFirestore.instance.collection('visits').where('status', isEqualTo: 'in_progress').snapshots(),
+      builder: (context, visitSnap) {
+        Set<Marker> markers = {};
+        Map<String, dynamic> activeVisitsByRep = {};
 
-    for (var log in activeLogs) {
-      var logData = log.data() as Map<String, dynamic>;
-      var repData = repsFullData[logData['repCode']] ?? {};
-      var loc = logData['location'];
-
-      if (loc != null && loc is Map) {
-        // تحويل آمن مهما كان نوع البيانات في الفايربيز
-        double? lat = double.tryParse(loc['lat'].toString());
-        double? lng = double.tryParse(loc['lng'].toString());
-
-        if (lat != null && lng != null) {
-          markers.add(
-            Marker(
-              markerId: MarkerId(logData['repCode']),
-              position: LatLng(lat, lng),
-              infoWindow: InfoWindow(
-                title: logData['repName'] ?? 'مندوب',
-                snippet: "كود: ${logData['repCode']}",
-                onTap: () => _makeCall(repData['phone']),
-              ),
-              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-            ),
-          );
+        if (visitSnap.hasData) {
+          for (var v in visitSnap.data!.docs) {
+            activeVisitsByRep[v['repCode']] = v.data();
+          }
         }
-      }
-    }
 
-    return GoogleMap(
-      initialCameraPosition: const CameraPosition(
-        target: LatLng(31.2001, 29.9187), // سنتر الإسكندرية
-        zoom: 12,
-      ),
-      markers: markers,
-      myLocationButtonEnabled: true,
-      myLocationEnabled: true,
-      mapType: MapType.normal,
+        for (var log in activeLogs) {
+          var logData = log.data() as Map<String, dynamic>;
+          var repCode = logData['repCode'];
+          var repData = repsFullData[repCode] ?? {};
+          var loc = logData['location'];
+
+          if (loc != null && loc is Map) {
+            double? lat = double.tryParse(loc['lat'].toString());
+            double? lng = double.tryParse(loc['lng'].toString());
+
+            if (lat != null && lng != null) {
+              bool inVisit = activeVisitsByRep.containsKey(repCode);
+              
+              markers.add(
+                Marker(
+                  markerId: MarkerId(repCode),
+                  position: LatLng(lat, lng),
+                  // اللون: أزرق (In Visit) أو أصفر (Online)
+                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                    inVisit ? BitmapDescriptor.hueAzure : BitmapDescriptor.hueYellow
+                  ),
+                  infoWindow: InfoWindow(
+                    title: logData['repName'] ?? 'مندوب',
+                    snippet: inVisit 
+                        ? "في زيارة: ${activeVisitsByRep[repCode]['customerName']}\nت: ${repData['phone']}"
+                        : "متصل حالياً - ت: ${repData['phone']}",
+                    onTap: () => _makeCall(repData['phone']),
+                  ),
+                ),
+              );
+            }
+          }
+        }
+
+        return GoogleMap(
+          initialCameraPosition: const CameraPosition(target: LatLng(31.2001, 29.9187), zoom: 12),
+          markers: markers,
+          myLocationButtonEnabled: true,
+          myLocationEnabled: true,
+        );
+      },
     );
   }
 
@@ -214,7 +232,6 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
                     if (inVisit && currentVisit != null) ...[
                       const Divider(),
                       _buildInfoRow(Icons.store, "العميل", currentVisit['customerName'] ?? 'غير معروف', color: kActiveVisitColor),
-                      // 📍 هنا العنوان اللي كان بيجيب "غير مسجل"
                       _buildInfoRow(Icons.location_on_outlined, "العنوان", currentVisit['customerAddress'] ?? 'عنوان غير مسجل', color: Colors.grey[600], isSmall: true),
                     ],
                     if (_userData?['role'] == 'sales_manager') ...[
