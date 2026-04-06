@@ -18,12 +18,6 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyDkKyX-w0P1SBgOCmqjfZVMOGUiAiCbhLA" />
 
-        <service
-            android:name="id.flutter.flutter_background_service.BackgroundService"
-            android:foregroundServiceType="location"
-            android:enabled="true"
-            android:exported="false" />
-
         <activity
             android:name=".MainActivity"
             android:exported="true"
