@@ -157,26 +157,48 @@ class _VisitScreenState extends State<VisitScreen> {
           .where('role', isEqualTo: 'buyer')
           .get();
 
-      List<DocumentSnapshot> tempCustomers = snap.docs;
+      List<DocumentSnapshot> allCustomers = snap.docs;
+      List<DocumentSnapshot> nearbyCustomers = [];
 
       if (currentPos != null) {
-        tempCustomers.sort((a, b) {
+        for (var doc in allCustomers) {
           try {
-            var locA = a['location'] as Map?;
-            var locB = b['location'] as Map?;
-            if (locA == null || locB == null) return 1;
-            double distA = Geolocator.distanceBetween(currentPos!.latitude, currentPos!.longitude, locA['lat'], locA['lng']);
-            double distB = Geolocator.distanceBetween(currentPos!.latitude, currentPos!.longitude, locB['lat'], locB['lng']);
-            return distA.compareTo(distB);
+            var loc = doc['location'] as Map?;
+            if (loc != null) {
+              // حساب المسافة بين المندوب وكل عميل بالمتر
+              double distance = Geolocator.distanceBetween(
+                currentPos.latitude,
+                currentPos.longitude,
+                loc['lat'],
+                loc['lng'],
+              );
+
+              // إضافة العميل فقط إذا كان في نطاق 500 متر
+              if (distance <= 500) {
+                nearbyCustomers.add(doc);
+              }
+            }
           } catch (e) {
-            return 0;
+            continue;
           }
+        }
+
+        // ترتيب القائمة المصغرة من الأقرب للأبعد
+        nearbyCustomers.sort((a, b) {
+          var locA = a['location'] as Map;
+          var locB = b['location'] as Map;
+          double distA = Geolocator.distanceBetween(currentPos!.latitude, currentPos!.longitude, locA['lat'], locA['lng']);
+          double distB = Geolocator.distanceBetween(currentPos!.latitude, currentPos!.longitude, locB['lat'], locB['lng']);
+          return distA.compareTo(distB);
         });
+      } else {
+        // في حال تعذر الحصول على الموقع، نعرض أول 30 عميل لضمان عدم توقف الشاشة
+        nearbyCustomers = allCustomers.take(30).toList();
       }
 
       setState(() {
-        _customers = tempCustomers;
-        _filteredCustomers = tempCustomers;
+        _customers = nearbyCustomers;
+        _filteredCustomers = nearbyCustomers;
         _isLoading = false;
       });
     } catch (e) {
@@ -200,8 +222,7 @@ class _VisitScreenState extends State<VisitScreen> {
     setState(() => _isLoading = true);
     try {
       Position? position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      
-      // جلب بيانات العميل المختار لاستخراج العنوان
+
       final customer = _customers.firstWhere((doc) => doc.id == _selectedCustomerId);
       final customerName = customer['fullname'];
       final customerAddress = (customer.data() as Map<String, dynamic>)['address'] ?? "عنوان غير مسجل";
@@ -211,16 +232,14 @@ class _VisitScreenState extends State<VisitScreen> {
         'repName': _userData!['fullname'],
         'customerId': _selectedCustomerId,
         'customerName': customerName,
-        'customerAddress': customerAddress, // الحقل الجديد المضاف
+        'customerAddress': customerAddress,
         'startTime': FieldValue.serverTimestamp(),
         'status': "in_progress",
         'location': position != null ? {'lat': position.latitude, 'lng': position.longitude} : null,
       };
 
-      // 1. إضافة الزيارة
       final docRef = await FirebaseFirestore.instance.collection('visits').add(visitData);
 
-      // 2. تفعيل العلامة الذكية في مستند المندوب
       final repQuery = await FirebaseFirestore.instance
           .collection('salesRep')
           .where('repCode', isEqualTo: _userData!['repCode'])
@@ -249,16 +268,13 @@ class _VisitScreenState extends State<VisitScreen> {
   Future<void> _endVisit() async {
     if (_visitStatus == null) return;
     setState(() => _isLoading = true);
-
     try {
-      // 1. تحديث الزيارة
       await FirebaseFirestore.instance.collection('visits').doc(_currentVisitId).update({
         'status': _visitStatus,
         'notes': _notesController.text,
         'endTime': FieldValue.serverTimestamp(),
       });
 
-      // 2. إزالة العلامة الذكية من مستند المندوب
       final repQuery = await FirebaseFirestore.instance
           .collection('salesRep')
           .where('repCode', isEqualTo: _userData!['repCode'])
@@ -324,7 +340,7 @@ class _VisitScreenState extends State<VisitScreen> {
           ),
         ),
         const SizedBox(height: 15),
-        const Text("اختر العميل (الأقرب لك دائماً في البداية)",
+        const Text("العملاء القريبون منك (في نطاق 500 متر)",
             style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
         const SizedBox(height: 10),
         Container(
@@ -335,7 +351,7 @@ class _VisitScreenState extends State<VisitScreen> {
             border: Border.all(color: Colors.grey.shade200),
           ),
           child: _filteredCustomers.isEmpty
-              ? const Center(child: Text("لا يوجد عملاء متاحين"))
+              ? const Center(child: Text("لا يوجد عملاء قريبون منك حالياً"))
               : ListView.builder(
                   itemCount: _filteredCustomers.length,
                   itemBuilder: (context, index) {
