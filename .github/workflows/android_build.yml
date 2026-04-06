@@ -1,4 +1,4 @@
-name: Build Flutter APK & AAB (Release)
+name: Build Flutter APK (Release Only)
 
 on:
   push:
@@ -51,15 +51,13 @@ jobs:
       - name: 🏗️ Build Release APK
         run: flutter build apk --release
 
-      # 7️⃣ Build Release App Bundle (AAB) - مطلوب لجوجل بلاي
-      - name: 🏗️ Build Release AAB
-        run: flutter build appbundle --release
+      # 7️⃣ تم إيقاف بناء الـ AAB مؤقتاً لتسريع العملية
+      # - name: 🏗️ Build Release AAB
+      #   run: flutter build appbundle --release
 
-      # 8️⃣ Upload Artifacts (APK & AAB)
+      # 8️⃣ Upload Artifacts (APK فقط)
       - name: 📤 Upload Release Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: aksab-sales-builds
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/bundle/release/app-release.aab
+          name: aksab-sales-apk-only
+          path: build/app/outputs/flutter-apk/app-release.apk
