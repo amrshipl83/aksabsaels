@@ -266,42 +266,67 @@ class _VisitScreenState extends State<VisitScreen> {
   }
 
   Future<void> _endVisit() async {
-    if (_visitStatus == null) return;
-    setState(() => _isLoading = true);
-    try {
-      await FirebaseFirestore.instance.collection('visits').doc(_currentVisitId).update({
-        'status': _visitStatus,
-        'notes': _notesController.text,
-        'endTime': FieldValue.serverTimestamp(),
+  if (_visitStatus == null) return;
+  setState(() => _isLoading = true);
+  try {
+    // 1. الحصول على الموقع الحالي بدقة عند الإغلاق لضمان تسجيل آخر نقطة
+    Position? position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high);
+
+    // 2. تحديث مستند الزيارة (كما هو)
+    await FirebaseFirestore.instance.collection('visits').doc(_currentVisitId).update({
+      'status': _visitStatus,
+      'notes': _notesController.text,
+      'endTime': FieldValue.serverTimestamp(),
+      'location': position != null ? {'lat': position.latitude, 'lng': position.longitude} : null,
+    });
+
+    // 3. تحديث حقل الـ location في daily_logs لضمان ثبات الماركر في لوحة التحكم
+    final logQuery = await FirebaseFirestore.instance
+        .collection('daily_logs')
+        .where('repCode', isEqualTo: _userData!['repCode'])
+        .where('status', isEqualTo: 'open')
+        .limit(1)
+        .get();
+
+    if (logQuery.docs.isNotEmpty && position != null) {
+      await logQuery.docs.first.reference.update({
+        'location': {'lat': position.latitude, 'lng': position.longitude},
+        'lastUpdate': FieldValue.serverTimestamp(), // لمتابعة وقت آخر تحديث
       });
-
-      final repQuery = await FirebaseFirestore.instance
-          .collection('salesRep')
-          .where('repCode', isEqualTo: _userData!['repCode'])
-          .limit(1)
-          .get();
-      if (repQuery.docs.isNotEmpty) {
-        await repQuery.docs.first.reference.update({'hasActiveVisit': false});
-      }
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('currentVisitId');
-      await prefs.remove('currentCustomerName');
-
-      setState(() {
-        _isVisiting = false;
-        _currentVisitId = null;
-        _currentCustomerName = null;
-        _visitStatus = null;
-        _notesController.clear();
-        _isLoading = false;
-      });
-      _loadCustomers(_userData!['repCode']);
-    } catch (e) {
-      debugPrint("End Visit Error: $e");
-      setState(() => _isLoading = false);
     }
+
+    // 4. تحديث علامة الزيارة في ملف المندوب (كما هو)
+    final repQuery = await FirebaseFirestore.instance
+        .collection('salesRep')
+        .where('repCode', isEqualTo: _userData!['repCode'])
+        .limit(1)
+        .get();
+    if (repQuery.docs.isNotEmpty) {
+      await repQuery.docs.first.reference.update({'hasActiveVisit': false});
+    }
+
+    // 5. مسح البيانات المحلية والعودة للحالة الطبيعية
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('currentVisitId');
+    await prefs.remove('currentCustomerName');
+
+    setState(() {
+      _isVisiting = false;
+      _currentVisitId = null;
+      _currentCustomerName = null;
+      _visitStatus = null;
+      _notesController.clear();
+      _isLoading = false;
+    });
+    
+    _loadCustomers(_userData!['repCode']);
+  } catch (e) {
+    debugPrint("End Visit Error: $e");
+    setState(() => _isLoading = false);
   }
+}
+
 
   void _showErrorPage(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
