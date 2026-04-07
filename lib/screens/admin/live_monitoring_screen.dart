@@ -17,7 +17,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
   bool _isMapView = false;
-  String? _selectedRepCode; // المندوب المختار لعرض مساره
+  String? _selectedRepCode; 
 
   final Color kPrimaryColor = const Color(0xFF1ABC9C);
   final Color kActiveVisitColor = const Color(0xFF3498DB);
@@ -154,15 +154,16 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
           String repCode = logData['repCode']?.toString() ?? "";
           var repData = repsFullData[repCode] ?? {};
 
-          // إحداثيات بداية اليوم (من السجل)
-          var startLoc = logData['startLocation'];
-          // إحداثيات الزيارة الحالية (من الزيارات)
+          // 1. نقطة البداية (Start)
+          LatLng? startLatLng = _parseLatLng(logData['startLocation']);
+          // 2. آخر نقطة معروفة في اللوج (Last Known) - دي اللي هتخلي الماركر يثبت بعد قفل الزيارة
+          LatLng? lastKnownLatLng = _parseLatLng(logData['location']); 
+          // 3. نقطة الزيارة الحالية (Current)
           var currentVisit = activeVisitsByRep[repCode];
-          var currentLoc = currentVisit != null ? currentVisit['location'] : null;
+          LatLng? currentLatLng = _parseLatLng(currentVisit != null ? currentVisit['location'] : null);
 
-          LatLng? startLatLng = _parseLatLng(startLoc);
-          LatLng? currentLatLng = _parseLatLng(currentLoc);
-          LatLng? displayPos = currentLatLng ?? startLatLng;
+          // تحديد مكان الماركر: الحالي أولاً، ثم الأخير المسجل، ثم البداية
+          LatLng? displayPos = currentLatLng ?? lastKnownLatLng ?? startLatLng;
 
           if (displayPos != null) {
             bool hasVisit = activeVisitsByRep.containsKey(repCode);
@@ -179,32 +180,31 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
                   title: logData['repName'] ?? 'مندوب',
                   snippet: hasVisit 
                       ? "في زيارة: ${activeVisitsByRep[repCode]['customerName']}\nت: ${repData['phone']}"
-                      : "متصل - ت: ${repData['phone']}",
+                      : "آخر موقع مسجل - ت: ${repData['phone']}",
                   onTap: () => _makeCall(repData['phone']),
                 ),
               ),
             );
 
-            // رسم المسار فقط للمندوب المختار لعدم تداخل الخطوط
-            if (_selectedRepCode == repCode && startLatLng != null && currentLatLng != null) {
+            // رسم المسار فقط للمندوب المختار
+            if (_selectedRepCode == repCode && startLatLng != null) {
               polylines.add(
                 Polyline(
                   polylineId: PolylineId("route_$repCode"),
-                  points: [startLatLng, currentLatLng],
+                  points: [startLatLng, displayPos],
                   color: kActiveVisitColor,
                   width: 4,
-                  patterns: [PatternItem.dash(20), PatternItem.gap(10)], // خط منقط احترافي
+                  patterns: [PatternItem.dash(20), PatternItem.gap(10)],
                 ),
               );
               
-              // ماركر لنقطة البداية لتوضيح المسار
               markers.add(
                 Marker(
                   markerId: MarkerId("start_$repCode"),
                   position: startLatLng,
                   icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
                   alpha: 0.6,
-                  infoWindow: const InfoWindow(title: "نقطة انطلاق المندوب"),
+                  infoWindow: const InfoWindow(title: "نقطة البداية"),
                 ),
               );
             }
@@ -218,7 +218,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
           polylines: polylines,
           myLocationButtonEnabled: true,
           myLocationEnabled: true,
-          onTap: (_) => setState(() => _selectedRepCode = null), // إلغاء الاختيار عند الضغط على الخريطة
+          onTap: (_) => setState(() => _selectedRepCode = null),
         );
       },
     );
@@ -230,9 +230,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
       double? lat = double.tryParse(loc['lat'].toString());
       double? lng = double.tryParse(loc['lng'].toString());
       if (lat != null && lng != null) return LatLng(lat, lng);
-    } catch (e) {
-      return null;
-    }
+    } catch (e) { return null; }
     return null;
   }
 
