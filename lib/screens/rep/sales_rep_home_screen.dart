@@ -15,6 +15,7 @@ import 'my_orders_screen.dart';
 import 'rep_store_lite_screen.dart';
 import 'rep_reports_screen.dart';
 import 'profile_screen.dart'; // مضاف لربط صفحة الملف الشخصي
+import 'wallet_screen.dart'; // مضاف لربط صفحة المحفظة
 import '../admin/offers_screen.dart';
 
 // --- الثوابت اللونية لهوية أكسب مبيعات ---
@@ -308,52 +309,56 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
               accountEmail: Text('كود الموظف: ${repData?['repCode'] ?? '...'}'),
             ),
             Expanded(
-                child: ListView(children: [
-              _drawerItem(Icons.dashboard_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
-              _drawerItem(Icons.account_circle_outlined, "حسابي والإعدادات", false, onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen()));
-              }),
-              _drawerItem(Icons.storefront_outlined, "المتجر", false, onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const RepStoreLiteScreen()));
-              }),
-              _drawerItem(Icons.track_changes_outlined, "الأهداف", false, onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
-              }),
-              _drawerItem(Icons.people_outline, "قائمة عملائي", false, onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen()));
-              }),
-              _drawerItem(Icons.receipt_outlined, "طلباتي", false, onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const MyOrdersScreen()));
-              }),
-              _drawerItem(Icons.location_on_outlined, "بدء زيارة", false, onTap: () {
-                Navigator.pop(context);
-                if (_isDayOpen) {
-                  Navigator.push(context, MaterialPageRoute(builder: (context) => const VisitScreen()));
-                } else {
-                  _showSnackBar("❌ يرجى فتح اليوم أولاً لتسجيل الزيارات");
-                }
-              }),
-              _drawerItem(Icons.local_offer_outlined, "مركز العروض والجوائز", false, onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
-              }),
-              _drawerItem(Icons.bar_chart_outlined, "تقارير الإنجاز", false, onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const RepReportsScreen()));
-              }),
-              _drawerItem(Icons.privacy_tip_outlined, "سياسة الخصوصية", false, onTap: () async {
-                Navigator.pop(context);
-                final Uri url = Uri.parse('https://aksab.shop/');
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url, mode: LaunchMode.externalApplication);
-                }
-              }),
-            ])),
+              child: ListView(children: [
+                _drawerItem(Icons.dashboard_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
+                _drawerItem(Icons.account_circle_outlined, "حسابي والإعدادات", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen()));
+                }),
+                _drawerItem(Icons.wallet_outlined, "محفظة العمولات", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const WalletScreen()));
+                }),
+                _drawerItem(Icons.storefront_outlined, "المتجر", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const RepStoreLiteScreen()));
+                }),
+                _drawerItem(Icons.track_changes_outlined, "الأهداف", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));
+                }),
+                _drawerItem(Icons.people_outline, "قائمة عملائي", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const MyCustomersScreen()));
+                }),
+                _drawerItem(Icons.receipt_outlined, "طلباتي", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const MyOrdersScreen()));
+                }),
+                _drawerItem(Icons.location_on_outlined, "بدء زيارة", false, onTap: () {
+                  Navigator.pop(context);
+                  if (_isDayOpen) {
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => const VisitScreen()));
+                  } else {
+                    _showSnackBar("❌ يرجى فتح اليوم أولاً لتسجيل الزيارات");
+                  }
+                }),
+                _drawerItem(Icons.local_offer_outlined, "مركز العروض والجوائز", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
+                }),
+                _drawerItem(Icons.bar_chart_outlined, "تقارير الإنجاز", false, onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const RepReportsScreen()));
+                }),
+                _drawerItem(Icons.privacy_tip_outlined, "سياسة الخصوصية", false, onTap: () async {
+                  Navigator.pop(context);
+                  final Uri url = Uri.parse('https://aksab.shop/');
+                  if (await canLaunchUrl(url)) {
+                    await launchUrl(url, mode: LaunchMode.externalApplication);
+                  }
+                }),
+              ])),
             const Divider(color: Colors.white24),
             _drawerItem(Icons.logout, "تسجيل الخروج", false, color: Colors.redAccent, onTap: () async {
               await FirebaseAuth.instance.signOut();
