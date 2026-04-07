@@ -17,9 +17,12 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
   bool _isMapView = false;
+  String? _selectedRepCode; // المندوب المختار لعرض مساره
+
   final Color kPrimaryColor = const Color(0xFF1ABC9C);
   final Color kActiveVisitColor = const Color(0xFF3498DB);
   final Color kSidebarColor = const Color(0xFF2F3542);
+  final Color kStartPointColor = Colors.orange;
 
   @override
   void initState() {
@@ -56,7 +59,8 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F6FA),
         appBar: AppBar(
-          title: Text("متابعة المندوبين لايف", style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold)),
+          title: Text("متابعة المندوبين لايف", 
+            style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold)),
           backgroundColor: Colors.white,
           foregroundColor: kSidebarColor,
           elevation: 0.5,
@@ -136,6 +140,7 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
       stream: FirebaseFirestore.instance.collection('visits').where('status', isEqualTo: 'in_progress').snapshots(),
       builder: (context, visitSnap) {
         Set<Marker> markers = {};
+        Set<Polyline> polylines = {};
         Map<String, dynamic> activeVisitsByRep = {};
 
         if (visitSnap.hasData) {
@@ -146,31 +151,60 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
 
         for (var log in activeLogs) {
           var logData = log.data() as Map<String, dynamic>;
-          var repCode = logData['repCode']?.toString() ?? "";
+          String repCode = logData['repCode']?.toString() ?? "";
           var repData = repsFullData[repCode] ?? {};
-          var loc = logData['location'];
 
-          if (loc != null && loc is Map) {
-            double? lat = double.tryParse(loc['lat'].toString());
-            double? lng = double.tryParse(loc['lng'].toString());
+          // إحداثيات بداية اليوم (من السجل)
+          var startLoc = logData['startLocation'];
+          // إحداثيات الزيارة الحالية (من الزيارات)
+          var currentVisit = activeVisitsByRep[repCode];
+          var currentLoc = currentVisit != null ? currentVisit['location'] : null;
 
-            if (lat != null && lng != null) {
-              bool inVisit = activeVisitsByRep.containsKey(repCode);
+          LatLng? startLatLng = _parseLatLng(startLoc);
+          LatLng? currentLatLng = _parseLatLng(currentLoc);
+          LatLng? displayPos = currentLatLng ?? startLatLng;
+
+          if (displayPos != null) {
+            bool hasVisit = activeVisitsByRep.containsKey(repCode);
+            
+            markers.add(
+              Marker(
+                markerId: MarkerId("rep_$repCode"),
+                position: displayPos,
+                icon: BitmapDescriptor.defaultMarkerWithHue(
+                  hasVisit ? BitmapDescriptor.hueAzure : BitmapDescriptor.hueYellow
+                ),
+                onTap: () => setState(() => _selectedRepCode = repCode),
+                infoWindow: InfoWindow(
+                  title: logData['repName'] ?? 'مندوب',
+                  snippet: hasVisit 
+                      ? "في زيارة: ${activeVisitsByRep[repCode]['customerName']}\nت: ${repData['phone']}"
+                      : "متصل - ت: ${repData['phone']}",
+                  onTap: () => _makeCall(repData['phone']),
+                ),
+              ),
+            );
+
+            // رسم المسار فقط للمندوب المختار لعدم تداخل الخطوط
+            if (_selectedRepCode == repCode && startLatLng != null && currentLatLng != null) {
+              polylines.add(
+                Polyline(
+                  polylineId: PolylineId("route_$repCode"),
+                  points: [startLatLng, currentLatLng],
+                  color: kActiveVisitColor,
+                  width: 4,
+                  patterns: [PatternItem.dash(20), PatternItem.gap(10)], // خط منقط احترافي
+                ),
+              );
               
+              // ماركر لنقطة البداية لتوضيح المسار
               markers.add(
                 Marker(
-                  markerId: MarkerId("rep_$repCode"),
-                  position: LatLng(lat, lng),
-                  icon: BitmapDescriptor.defaultMarkerWithHue(
-                    inVisit ? BitmapDescriptor.hueAzure : BitmapDescriptor.hueYellow
-                  ),
-                  infoWindow: InfoWindow(
-                    title: logData['repName'] ?? 'مندوب',
-                    snippet: inVisit 
-                        ? "في زيارة: ${activeVisitsByRep[repCode]['customerName']}\nت: ${repData['phone']}"
-                        : "متصل حالياً - ت: ${repData['phone']}",
-                    onTap: () => _makeCall(repData['phone']),
-                  ),
+                  markerId: MarkerId("start_$repCode"),
+                  position: startLatLng,
+                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+                  alpha: 0.6,
+                  infoWindow: const InfoWindow(title: "نقطة انطلاق المندوب"),
                 ),
               );
             }
@@ -178,15 +212,28 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
         }
 
         return GoogleMap(
-          key: ValueKey(markers.length),
+          key: ValueKey("${markers.length}_$_selectedRepCode"),
           initialCameraPosition: const CameraPosition(target: LatLng(31.2001, 29.9187), zoom: 12),
           markers: markers,
+          polylines: polylines,
           myLocationButtonEnabled: true,
           myLocationEnabled: true,
-          mapType: MapType.normal,
+          onTap: (_) => setState(() => _selectedRepCode = null), // إلغاء الاختيار عند الضغط على الخريطة
         );
       },
     );
+  }
+
+  LatLng? _parseLatLng(dynamic loc) {
+    if (loc == null || loc is! Map) return null;
+    try {
+      double? lat = double.tryParse(loc['lat'].toString());
+      double? lng = double.tryParse(loc['lng'].toString());
+      if (lat != null && lng != null) return LatLng(lat, lng);
+    } catch (e) {
+      return null;
+    }
+    return null;
   }
 
   Widget _buildRepLiveCard(Map<String, dynamic> logData, Map<String, dynamic> repDocData) {
