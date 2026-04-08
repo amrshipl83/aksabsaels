@@ -52,8 +52,8 @@ jobs:
         run: flutter build apk --release
 
       # 7️⃣ تم إيقاف بناء الـ AAB مؤقتاً لتسريع العملية
-      # - name: 🏗️ Build Release AAB
-      #   run: flutter build appbundle --release
+       - name: 🏗️ Build Release AAB
+         run: flutter build appbundle --release
 
       # 8️⃣ Upload Artifacts (APK فقط)
       - name: 📤 Upload Release Artifacts
