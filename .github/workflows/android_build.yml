@@ -51,13 +51,15 @@ jobs:
       - name: 🏗️ Build Release APK
         run: flutter build apk --release
 
-      # 7️⃣ تم إيقاف بناء الـ AAB مؤقتاً لتسريع العملية
-       - name: 🏗️ Build Release AAB
-         run: flutter build appbundle --release
+      # 7️⃣ Build Release AAB (تم ضبط المحاذاة)
+      - name: 🏗️ Build Release AAB
+        run: flutter build appbundle --release
 
-      # 8️⃣ Upload Artifacts (APK فقط)
+      # 8️⃣ Upload Artifacts (APK & AAB)
       - name: 📤 Upload Release Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: aksab-sales-apk-only
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: aksab-release-files
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
