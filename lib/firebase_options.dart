@@ -50,22 +50,21 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyAkabIX4PpAGaVQf7ni8AU7eUB78ngJiDk',
-    appId: '1:32660558108:web:8eb30538b8cd916753ead9',
-    messagingSenderId: '32660558108',
-    projectId: 'aksabeg-b6571',
-    authDomain: 'aksabeg-b6571.firebaseapp.com',
-    databaseURL: 'https://aksabeg-b6571-default-rtdb.firebaseio.com',
-    storageBucket: 'aksabeg-b6571.firebasestorage.app',
-    measurementId: 'G-3CLR32M09N',
+    apiKey: 'AIzaSyD1eholuDAnsQTI-fcTqVVM4A9o7a02FUU',
+    appId: '1:549455573441:web:757e2dfa938c8267c4ff40', // تم إسقاطها توافقياً مع المشروع الجديد
+    messagingSenderId: '549455573441',
+    projectId: 'aksab-erp',
+    authDomain: 'aksab-erp.firebaseapp.com',
+    databaseURL: 'https://aksab-erp-default-rtdb.firebaseio.com',
+    storageBucket: 'aksab-erp.firebasestorage.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyCczxrmzYiFRZuDHOqhgqcH-DGvV1z8WZ0',
-    appId: '1:32660558108:android:0646a3e54a8b1d9e53ead9',
-    messagingSenderId: '32660558108',
-    projectId: 'aksabeg-b6571',
-    databaseURL: 'https://aksabeg-b6571-default-rtdb.firebaseio.com',
-    storageBucket: 'aksabeg-b6571.firebasestorage.app',
+    apiKey: 'AIzaSyD1eholuDAnsQTI-fcTqVVM4A9o7a02FUU',
+    appId: '1:549455573441:android:306272e4aa203672c4ff40',
+    messagingSenderId: '549455573441',
+    projectId: 'aksab-erp',
+    databaseURL: 'https://aksab-erp-default-rtdb.firebaseio.com',
+    storageBucket: 'aksab-erp.firebasestorage.app',
   );
 }
