@@ -2,7 +2,7 @@ name: aksab_sales
 description: "A specialized Flutter application for Sales Representatives and Managers."
 publish_to: 'none'
 # الإصدار 8 لتخطي أي مسودات سابقة في المتجر
-version: 1.0.1+8
+version: 1.0.1+9
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
