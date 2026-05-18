@@ -1,9 +1,9 @@
+// lib/screens/auth/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'register_screen.dart';
 
@@ -32,29 +32,34 @@ class _LoginScreenState extends State<LoginScreen> {
     _checkExistingLogin();
   }
 
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
   // ✅ دالة التعامل مع الـ Timestamp أثناء تحويل البيانات لـ JSON (من الكود الأصلي)
   dynamic _encoder(dynamic item) {
     if (item is Timestamp) return item.toDate().toIso8601String();
     return item;
   }
 
-  Future<void> _registerNotification(String userId, String role, String address) async {
+  // ✅ تحديث توكن الإشعارات مباشرة داخل الفايربيز (بديل أمازون المستقر)
+  Future<void> _updateFcmTokenInFirestore(String docId, String collectionName) async {
     try {
       String? token = await FirebaseMessaging.instance.getToken();
       if (token == null) return;
 
-      await http.post(
-        Uri.parse('https://5uex7vzy64.execute-api.us-east-1.amazonaws.com/V2/new_nofiction'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'userId': userId,
-          'fcmToken': token,
-          'role': role,
-          'address': address,
-        }),
-      );
+      await FirebaseFirestore.instance
+          .collection(collectionName)
+          .doc(docId)
+          .update({
+            'fcmToken': token,
+            'lastLogin': FieldValue.serverTimestamp(),
+          });
     } catch (e) {
-      debugPrint("Notification Sync Error: $e");
+      debugPrint("FCM Token Local Update Error: $e");
     }
   }
 
@@ -84,11 +89,12 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     String input = _phoneController.text.trim();
-    // ✅ النطاق الجديد حصرياً
+    // ✅ النطاق الذكي الحصري لفريق المبيعات والإدارة
     String smartEmail = input.contains('@') ? input : "$input@aksabsales.com";
     final password = _passwordController.text.trim();
 
     try {
+      // الدخول المباشر بالرقم والباسورد يدوياً بدون تفعيل تلقائي
       final userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: smartEmail,
         password: password,
@@ -99,8 +105,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
       DocumentSnapshot? userDocSnapshot;
       String? userRole;
+      String? matchedCollection;
 
-      // ✅ البحث في كولكشن salesRep (المفرد) بناءً على الـ Firestore
+      // ✅ البحث في كولكشن salesRep (المفرد) بناءً على قواعد الـ Firestore الثابتة
       final salesRepQuery = await FirebaseFirestore.instance
           .collection('salesRep') 
           .where('uid', isEqualTo: user.uid)
@@ -110,6 +117,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (salesRepQuery.docs.isNotEmpty) {
         userDocSnapshot = salesRepQuery.docs.first;
         userRole = 'sales_rep';
+        matchedCollection = 'salesRep';
       }
 
       if (userDocSnapshot == null) {
@@ -121,15 +129,17 @@ class _LoginScreenState extends State<LoginScreen> {
         if (managersQuery.docs.isNotEmpty) {
           userDocSnapshot = managersQuery.docs.first;
           userRole = userDocSnapshot.get('role')?.toString();
+          matchedCollection = 'managers';
         }
       }
 
-      if (userDocSnapshot != null && userRole != null) {
+      if (userDocSnapshot != null && userRole != null && matchedCollection != null) {
         final userDocData = userDocSnapshot.data() as Map<String, dynamic>;
         userDocData['docId'] = userDocSnapshot.id;
 
         if (userDocData['status'] == 'approved') {
-          await _registerNotification(user.uid, userRole, userDocData['address'] ?? "");
+          // ✅ مناداة تحديث الإشعارات مباشرة في الفايرستور بدلاً من دالة أمازون المحذوفة
+          await _updateFcmTokenInFirestore(userDocSnapshot.id, matchedCollection);
 
           final prefs = await SharedPreferences.getInstance();
           // ✅ التخزين باستخدام الـ encoder لضمان عدم حدوث خطأ في الـ Timestamps
@@ -195,9 +205,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     const Icon(Icons.stars_rounded, size: 70, color: kPrimaryColor),
                     const SizedBox(height: 10),
                     const Text('أكسب للمبيعات', 
-                        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: kSecondaryColor)),
+                        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: kSecondaryColor, fontFamily: 'Cairo')),
                     const Text('منظومة المندوب الذكي', 
-                        style: TextStyle(fontSize: 14, color: Colors.grey)),
+                        style: TextStyle(fontSize: 14, color: Colors.grey, fontFamily: 'Cairo')),
                     const SizedBox(height: 30),
                     _buildField(_phoneController, 'رقم الهاتف', Icons.phone_android, isPhone: true),
                     const SizedBox(height: 20),
@@ -214,18 +224,18 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         child: _isLoading
                             ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text('دخول للفريق', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
+                            : const Text('دخول للفريق', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold, fontFamily: 'Cairo')),
                       ),
                     ),
                     if (_errorMessage != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 15),
-                        child: Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w500)),
+                        child: Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w500, fontFamily: 'Cairo')),
                       ),
                     const SizedBox(height: 20),
                     TextButton(
                       onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen())),
-                      child: const Text('طلب انضمام لفريق المبيعات', style: TextStyle(color: kPrimaryColor, fontWeight: FontWeight.bold)),
+                      child: const Text('طلب انضمام لفريق المبيعات', style: TextStyle(color: kPrimaryColor, fontWeight: FontWeight.bold, fontFamily: 'Cairo')),
                     ),
                   ],
                 ),
@@ -243,10 +253,17 @@ class _LoginScreenState extends State<LoginScreen> {
       obscureText: isPass,
       textAlign: TextAlign.right,
       keyboardType: isPhone ? TextInputType.phone : TextInputType.text,
+      style: const TextStyle(fontFamily: 'Cairo'),
       decoration: InputDecoration(
         labelText: label,
+        labelStyle: const TextStyle(fontFamily: 'Cairo'),
         prefixIcon: Icon(icon, color: kPrimaryColor),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide(color: Colors.grey[300]!)),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(15),
+          borderSide: const BorderSide(color: kPrimaryColor, width: 2),
+        ),
         filled: true,
         fillColor: Colors.grey[50],
       ),

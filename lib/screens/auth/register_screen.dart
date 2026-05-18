@@ -1,3 +1,4 @@
+// lib/screens/auth/register_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -30,6 +31,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
     'sales_manager': 'مدير مبيعات',
   };
 
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _passwordController.dispose();
+    _phoneController.dispose();
+    _addressController.dispose();
+    super.dispose();
+  }
+
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -41,21 +51,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
     String phone = _phoneController.text.trim();
     // استخدام النطاق الجديد للفصل بين المنصات
     String smartEmail = "$phone@aksabsales.com";
+    String password = _passwordController.text;
 
     try {
-      // 1. إنشاء الحساب في Firebase Auth
+      // 1. إنشاء الحساب في Firebase Auth باستخدام الإيميل الذكي والباسوورد المدخلة من المستخدم
       final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: smartEmail,
-        password: _passwordController.text,
+        password: password,
       );
 
       final String uid = userCredential.user!.uid;
 
-      // 2. تحديد الكولكشن المناسب
+      // 2. تحديد الكولكشن المناسب (pendingReps للمندوب و pendingManagers للمشرف والمدير)
       String collectionName = (_selectedRole == "sales_rep") ? "pendingReps" : "pendingManagers";
 
-      // 3. حفظ البيانات في Firestore
+      // 3. حفظ البيانات كاملة في Firestore (تمت إزالة أي استدعاء أو ربط بأمازون تماماً)
       await FirebaseFirestore.instance.collection(collectionName).doc(uid).set({
+        'uid': uid,
         'fullname': _nameController.text.trim(),
         'email': smartEmail,
         'phone': phone,
@@ -63,8 +75,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'role': _selectedRole,
         'status': "pending",
         'createdAt': FieldValue.serverTimestamp(),
-        'uid': uid,
-        'appType': 'sales', // لتمييز الطلب مستقبلاً
+        'appType': 'sales', // لتمييز الطلب مستقبلاً داخل لوحة التحكم لـ Flutter Web
       });
 
       setState(() {
@@ -99,10 +110,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: const Text("إنضم لفريق أكسب مبيعات"),
+        title: const Text(
+          "إنضم لفريق أكسب مبيعات",
+          style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, color: Colors.white),
+        ),
         backgroundColor: aksabRed,
         centerTitle: true,
         elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(25),
@@ -126,11 +141,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     _buildField(_passwordController, "كلمة المرور", Icons.lock, isPass: true),
                     _buildField(_addressController, "محل الإقامة / المنطقة", Icons.location_on),
                     const Divider(height: 30),
-                    const Text("المسمى الوظيفي المطلوب:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const Text(
+                      "المسمى الوظيفي المطلوب:",
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, fontFamily: 'Cairo'),
+                    ),
                     const SizedBox(height: 10),
                     ..._roles.entries.map((entry) {
                       return RadioListTile<String>(
-                        title: Text(entry.value),
+                        title: Text(entry.value, style: const TextStyle(fontFamily: 'Cairo')),
                         value: entry.key,
                         groupValue: _selectedRole,
                         activeColor: aksabRed,
@@ -140,9 +158,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     if (_message != null)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 15),
-                        child: Text(_message!,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: _isSuccess ? Colors.green : aksabRed, fontWeight: FontWeight.bold)),
+                        child: Text(
+                          _message!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _isSuccess ? Colors.green : aksabRed,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'Cairo',
+                          ),
+                        ),
                       ),
                     const SizedBox(height: 10),
                     SizedBox(
@@ -156,7 +180,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         child: _isLoading
                             ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text("إرسال طلب الانضمام", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                            : const Text(
+                                "إرسال طلب الانضمام",
+                                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Cairo'),
+                              ),
                       ),
                     ),
                   ],
@@ -177,17 +204,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
         obscureText: isPass,
         textAlign: TextAlign.right,
         keyboardType: isPhone ? TextInputType.phone : TextInputType.text,
+        style: const TextStyle(fontFamily: 'Cairo'),
         decoration: InputDecoration(
           labelText: label,
+          labelStyle: const TextStyle(fontFamily: 'Cairo'),
           prefixIcon: Icon(icon, color: aksabRed),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey[300]!)),
           enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey[200]!)),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: aksabRed, width: 2),
+          ),
           filled: true,
           fillColor: Colors.grey[50],
         ),
-        validator: (v) => (v == null || v.isEmpty) ? "هذا الحقل مطلوب" : null,
+        validator: (v) {
+          if (v == null || v.isEmpty) return "هذا الحقل مطلوب";
+          if (isPhone && v.length < 10) return "رقم هاتف غير صحيح";
+          return null;
+        },
       ),
     );
   }
 }
-
