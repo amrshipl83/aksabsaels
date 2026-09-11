@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
-import 'package:fl_chart/fl_chart.dart'; // مكتبة الرسم البياني
 
 class GoalsScreen extends StatefulWidget {
   const GoalsScreen({super.key});
@@ -21,7 +20,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
     'workingHours': 0.0,
     'totalVisits': 0,
   };
-  List<FlSpot> _chartData = [];
+  List<Offset> _chartData = [];
   Map<String, dynamic>? _monthlyGoals;
 
   @override
@@ -76,10 +75,10 @@ class _GoalsScreenState extends State<GoalsScreen> {
       }
 
       // تحويل البيانات لنقاط على الرسم البياني
-      _chartData = dailySales.entries
-          .map((e) => FlSpot(e.key.toDouble(), e.value))
+        _chartData = dailySales.entries
+          .map((e) => Offset(e.key.toDouble(), e.value))
           .toList();
-      if (_chartData.isEmpty) _chartData = [const FlSpot(0, 0)];
+        if (_chartData.isEmpty) _chartData = [Offset.zero];
 
       // 3. جلب ساعات العمل من daily_logs
       final logsSnap = await FirebaseFirestore.instance
@@ -226,25 +225,52 @@ class _GoalsScreenState extends State<GoalsScreen> {
       height: 250,
       padding: const EdgeInsets.fromLTRB(10, 20, 20, 10),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
-      child: LineChart(
-        LineChartData(
-          gridData: const FlGridData(show: false),
-          titlesData: const FlTitlesData(show: false),
-          borderData: FlBorderData(show: false),
-          lineBarsData: [
-            LineChartBarData(
-              spots: _chartData,
-              isCurved: true,
-              color: const Color(0xFF1ABC9C),
-              barWidth: 4,
-              isStrokeCapRound: true,
-              dotData: const FlDotData(show: false),
-              belowBarData: BarAreaData(show: true, color: const Color(0xFF1ABC9C).withOpacity(0.1)),
-            ),
-          ],
-        ),
+      child: CustomPaint(
+        painter: _SalesChartPainter(_chartData),
       ),
     );
   }
+}
+
+class _SalesChartPainter extends CustomPainter {
+  final List<Offset> data;
+
+  const _SalesChartPainter(this.data);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (data.isEmpty) return;
+
+    final sorted = [...data]..sort((a, b) => a.dx.compareTo(b.dx));
+    final maxDay = sorted.last.dx <= 0 ? 1.0 : sorted.last.dx;
+    final maxSales = sorted.map((point) => point.dy).reduce((a, b) => a > b ? a : b);
+    final salesRange = maxSales <= 0 ? 1.0 : maxSales;
+    final points = sorted.map((point) => Offset(
+          point.dx / maxDay * size.width,
+          size.height - point.dy / salesRange * size.height,
+        )).toList();
+
+    final line = Path()..moveTo(points.first.dx, points.first.dy);
+    for (final point in points.skip(1)) {
+      line.lineTo(point.dx, point.dy);
+    }
+    final area = Path.from(line)
+      ..lineTo(points.last.dx, size.height)
+      ..lineTo(points.first.dx, size.height)
+      ..close();
+
+    canvas.drawPath(area, Paint()..color = const Color(0x1A1ABC9C));
+    canvas.drawPath(
+      line,
+      Paint()
+        ..color = const Color(0xFF1ABC9C)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _SalesChartPainter oldDelegate) => oldDelegate.data != data;
 }
 

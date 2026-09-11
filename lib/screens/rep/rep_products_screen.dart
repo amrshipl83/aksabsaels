@@ -13,7 +13,7 @@ class RepProductsScreen extends StatefulWidget {
     super.key,
     required this.subId,
     required this.subName,
-    this.initialPosition
+    this.initialPosition,
   });
 
   @override
@@ -191,7 +191,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
             return _buildProductOffers(
               productDoc.id,
               productData['name'] ?? '',
-              imageUrl
+              imageUrl,
             );
           },
         );
@@ -238,13 +238,81 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
             children: filteredOffers.map((offerDoc) {
               var offer = offerDoc.data() as Map<String, dynamic>;
               String sellerName = offer['sellerName'] ?? "تاجر";
-              var price = offer['price'] ?? offer['units']?[0]['price'];
+              
+              // **منطق استخراج السعر والسعر المخفض (Offer Price)**
+              double originalPrice = 0.0;
+              if (offer['units'] != null && (offer['units'] as List).isNotEmpty) {
+                originalPrice = double.tryParse(offer['units'][0]['price'].toString()) ?? 0.0;
+              } else if (offer['price'] != null) {
+                originalPrice = double.tryParse(offer['price'].toString()) ?? 0.0;
+              }
+
+              double? offerPrice;
+              if (offer['offerPrice'] != null) {
+                offerPrice = double.tryParse(offer['offerPrice'].toString());
+              }
+
+              // التحقق من وجود عرض تخفيض حقيقي
+              bool hasDiscount = offerPrice != null && offerPrice > 0 && offerPrice < originalPrice;
+              double finalPrice = hasDiscount ? offerPrice! : originalPrice;
+
               String offerId = offerDoc.id;
+
               return Container(
-                decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.grey.shade200)), color: Colors.grey.shade50),
+                decoration: BoxDecoration(
+                  border: Border(
+                    top: BorderSide(color: Colors.grey.shade200),
+                    right: BorderSide(
+                      color: hasDiscount ? Colors.orange.shade600 : Colors.transparent, 
+                      width: hasDiscount ? 4 : 0,
+                    ),
+                  ),
+                  color: hasDiscount ? Colors.amber.shade50.withOpacity(0.4) : Colors.grey.shade50,
+                ),
                 child: ListTile(
-                  title: Text(sellerName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                  subtitle: Text("السعر: $price ج.م", style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  title: Row(
+                    children: [
+                      Text(sellerName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                      if (hasDiscount) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade700,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            "عرض خاص",
+                            style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  subtitle: Row(
+                    children: [
+                      if (hasDiscount) ...[
+                        Text(
+                          "$originalPrice ج.م",
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                            decoration: TextDecoration.lineThrough,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(
+                        "السعر: $finalPrice ج.م",
+                        style: TextStyle(
+                          color: hasDiscount ? Colors.green.shade700 : Colors.green,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
                   trailing: _demoCart.containsKey(offerId)
                       ? _buildQtyControl(offerId, isInsideModal: false)
                       : ElevatedButton(
@@ -252,11 +320,14 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
                             _demoCart[offerId] = {
                               'id': offerId,
                               'name': "$name - $sellerName",
-                              'price': double.parse(price.toString()),
+                              'price': finalPrice,
                               'qty': 1
                             };
                           }),
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF43B97F)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: hasDiscount ? Colors.orange.shade700 : const Color(0xFF43B97F),
+                            elevation: hasDiscount ? 2 : 0,
+                          ),
                           child: const Text("إضافة", style: TextStyle(color: Colors.white, fontSize: 12)),
                         ),
                 ),
@@ -268,10 +339,13 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
     );
   }
 
-  // 💡 إضافة StateSetter لتحديث واجهة السلة (Modal) عند الضغط
   Widget _buildQtyControl(String id, {required bool isInsideModal, StateSetter? modalState}) {
     return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.grey.shade300)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -286,7 +360,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
                   if (isInsideModal && _demoCart.isEmpty) Navigator.pop(context);
                 }
               });
-              if (modalState != null) modalState(() {}); // تحديث السلة
+              if (modalState != null) modalState(() {});
             },
           ),
           Text("${_demoCart[id]!['qty']}", style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -296,7 +370,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
               setState(() {
                 _demoCart[id]!['qty']++;
               });
-              if (modalState != null) modalState(() {}); // تحديث السلة
+              if (modalState != null) modalState(() {});
             },
           ),
         ],
@@ -318,7 +392,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
               color: Colors.white, 
               borderRadius: BorderRadius.vertical(top: Radius.circular(25))
             ),
-            child: SafeArea( // 🔥 مساحة آمنة لضبط السلة في شاشات الموبايل الحديثة
+            child: SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -335,7 +409,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
                         return ListTile(
                           title: Text(item['name'], style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                           subtitle: Text("${item['price']} ج.م"),
-                          trailing: _buildQtyControl(id, isInsideModal: true, modalState: setModalState), // مررنا الستيت هنا
+                          trailing: _buildQtyControl(id, isInsideModal: true, modalState: setModalState),
                         );
                       }).toList(),
                     ),
@@ -352,7 +426,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
                       onPressed: () => Navigator.pop(context), 
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF43B97F)),
                       child: const Text("إغلاق", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
-                    )
+                    ),
                   ),
                 ],
               ),
@@ -363,4 +437,3 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
     );
   }
 }
-

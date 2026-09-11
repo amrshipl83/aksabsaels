@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -286,6 +285,8 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   }
 
   Widget _buildStatusChartSection() {
+    final chartTotal = salesByStatus.values.fold<double>(0, (sum, value) => sum + value);
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
@@ -293,25 +294,42 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
         children: [
           const Text('توزيع الحالات', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 20),
-          SizedBox(
-            height: 180,
-            child: PieChart(
-              PieChartData(
-                sectionsSpace: 2,
-                centerSpaceRadius: 40,
-                sections: salesByStatus.entries.map((entry) {
-                  return PieChartSectionData(
-                    value: entry.value,
-                    title: '${((entry.value / totalSales) * 100).toStringAsFixed(0)}%',
-                    titleStyle: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                    color: _getStatusColor(entry.key),
-                    radius: 50,
-                  );
-                }).toList(),
+          ...salesByStatus.entries.map((entry) {
+            final percentage = chartTotal == 0 ? 0.0 : entry.value / chartTotal;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: _getStatusColor(entry.key),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(entry.key)),
+                      Text('${(percentage * 100).toStringAsFixed(0)}%'),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: percentage,
+                      minHeight: 8,
+                      backgroundColor: Colors.grey.shade200,
+                      valueColor: AlwaysStoppedAnimation<Color>(_getStatusColor(entry.key)),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ),
+            );
+          }),
         ],
       ),
     );
