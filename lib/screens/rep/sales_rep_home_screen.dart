@@ -17,6 +17,7 @@ import 'rep_reports_screen.dart';
 import 'profile_screen.dart'; // مضاف لربط صفحة الملف الشخصي
 import 'wallet_screen.dart'; // مضاف لربط صفحة المحفظة
 import '../admin/offers_screen.dart';
+import 'shira_voice_chat_widget.dart'; // استدعاء ويدجت مساعد شيرا الصوتي
 
 // --- الثوابت اللونية لهوية أكسب مبيعات ---
 const Color kPrimaryColor = Color(0xFFB21F2D); // أحمر أكسب
@@ -208,6 +209,24 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: kPrimaryColor));
   }
 
+  // --- فتح نافذة شات شيرا الصوتي المساعد ---
+  void _openShiraVoiceAssistant() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return FractionallySizedBox(
+          heightFactor: 0.85,
+          child: ShiraVoiceChatWidget(
+            cloudFunctionUrl: 'https://shirachat-uc.a.run.app', // استبدل بالرابط المباشر للـ Cloud Function الخاصة بك
+            userRole: repData?['role'] ?? 'sales_representative',
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -250,6 +269,17 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                 ],
               ),
             ),
+          ),
+        ),
+
+        // --- زر المساعد الصوتي (شيرا) العائم ---
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _openShiraVoiceAssistant,
+          backgroundColor: kPrimaryColor,
+          icon: const Icon(Icons.graphic_eq_rounded, color: Colors.white),
+          label: const Text(
+            'مساعد شيرا',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
           ),
         ),
       ),
@@ -380,4 +410,3 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     );
   }
 }
-

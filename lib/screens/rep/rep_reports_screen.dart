@@ -43,7 +43,6 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   Future<void> _fetchOrders() async {
     setState(() => _isLoading = true);
     try {
-      // جلب البيانات الأساسية للمندوب
       final snapshot = await FirebaseFirestore.instance
           .collection('orders')
           .where('buyer.repCode', isEqualTo: repData!['repCode'])
@@ -52,22 +51,27 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
       double tempTotal = 0;
       Map<String, double> tempStatusSales = {};
       Map<String, int> tempStatusCount = {};
-      DateTime now = DateTime.now();
+      
+      // نأخذ التاريخ الحالي بالتوقيت المحلي للجهاز
+      DateTime now = DateTime.now().toLocal();
 
       for (var doc in snapshot.docs) {
         var data = doc.data();
         DateTime? orderDate;
 
-        // محاولة استخراج التاريخ بأمان
+        // استخراج وتوحيد صيغة التاريخ بدقة إلى الـ Local Time
         if (data['createdAt'] != null) {
           if (data['createdAt'] is Timestamp) {
-            orderDate = (data['createdAt'] as Timestamp).toDate();
+            orderDate = (data['createdAt'] as Timestamp).toDate().toLocal();
           } else if (data['createdAt'] is String) {
-            orderDate = DateTime.tryParse(data['createdAt']);
+            orderDate = DateTime.tryParse(data['createdAt'])?.toLocal();
+          } else if (data['createdAt'] is int) {
+            orderDate = DateTime.fromMillisecondsSinceEpoch(data['createdAt']).toLocal();
           }
         }
 
         bool matchesFilter = true;
+        
         if (_selectedFilter != 'all') {
           if (orderDate != null) {
             if (_selectedFilter == 'day') {
@@ -75,10 +79,10 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
                   orderDate.month == now.month &&
                   orderDate.day == now.day;
             } else if (_selectedFilter == 'month') {
-              matchesFilter = orderDate.year == now.year && orderDate.month == now.month;
+              matchesFilter = orderDate.year == now.year && 
+                  orderDate.month == now.month;
             }
           } else {
-            // لو مفيش تاريخ، يظهر فقط في "الكل"
             matchesFilter = false;
           }
         }
@@ -124,7 +128,7 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text('تقارير رابية أحلى - المندوب',
+                  pw.Text('تقارير المندوب',
                       style: pw.TextStyle(font: boldFont, fontSize: 18, color: PdfColors.green)),
                   pw.Text(DateTime.now().toString().substring(0, 10),
                       style: pw.TextStyle(font: font, fontSize: 12)),
@@ -369,7 +373,6 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
           const SizedBox(height: 10),
           const Text("لا توجد مبيعات مسجلة لهذه الفترة", style: TextStyle(color: Colors.grey)),
           const SizedBox(height: 20),
-          // زر لإعادة المحاولة أو الانتقال لتبويب الكل
           TextButton(
             onPressed: () {
               setState(() => _selectedFilter = 'all');
@@ -395,4 +398,3 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
     }
   }
 }
-
