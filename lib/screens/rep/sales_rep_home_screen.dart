@@ -219,7 +219,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
         return FractionallySizedBox(
           heightFactor: 0.85,
           child: ShiraVoiceChatWidget(
-            cloudFunctionUrl: 'https://shirachat-uc.a.run.app', // استبدل بالرابط المباشر للـ Cloud Function الخاصة بك
+            cloudFunctionUrl: 'https://shirachat-tmfag3rhdq-uc.a.run.app', // استبدل بالرابط المباشر للـ Cloud Function الخاصة بك
             userRole: repData?['role'] ?? 'sales_representative',
           ),
         );

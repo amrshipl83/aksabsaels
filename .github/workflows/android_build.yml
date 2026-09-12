@@ -1,4 +1,4 @@
-name: Build Flutter APK (Release Only)
+name: Build Flutter Release (APK & AAB Separated)
 
 on:
   push:
@@ -8,32 +8,29 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  # 1️⃣ الوظيفة الأولى: بناء وتنزيل الـ APK فقط
+  build-apk:
+    name: 📱 Build APK
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout الكود
       - name: 🧩 Checkout Code
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup Java
       - name: ☕️ Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
-      # 3️⃣ Setup Flutter
       - name: 🔧 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
 
-      # 4️⃣ Install dependencies
       - name: 📦 Install Dependencies
         run: flutter pub get
 
-      # 5️⃣ فك تشفير المفتاح وإنشاء ملف الخصائص
       - name: 🔑 Setup Code Signing
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -47,19 +44,56 @@ jobs:
           echo "keyAlias=$KEY_ALIAS" >> android/key.properties
           echo "storeFile=aksabsales.jks" >> android/key.properties
 
-      # 6️⃣ Build Release APK
       - name: 🏗️ Build Release APK
         run: flutter build apk --release
 
-      # 7️⃣ Build Release AAB (تم ضبط المحاذاة)
+      - name: 📤 Upload APK Artifact Only
+        uses: actions/upload-artifact@v4
+        with:
+          name: aksab-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  # 2️⃣ الوظيفة الثانية: بناء وتنزيل الـ AAB فقط
+  build-aab:
+    name: 📦 Build AAB (App Bundle)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🧩 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: ☕️ Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: 🔧 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: 📦 Install Dependencies
+        run: flutter pub get
+
+      - name: 🔑 Setup Code Signing
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > android/app/aksabsales.jks
+          echo "storePassword=$STORE_PASSWORD" > android/key.properties
+          echo "keyPassword=$KEY_PASSWORD" >> android/key.properties
+          echo "keyAlias=$KEY_ALIAS" >> android/key.properties
+          echo "storeFile=aksabsales.jks" >> android/key.properties
+
       - name: 🏗️ Build Release AAB
         run: flutter build appbundle --release
 
-      # 8️⃣ Upload Artifacts (APK & AAB)
-      - name: 📤 Upload Release Artifacts
+      - name: 📤 Upload AAB Artifact Only
         uses: actions/upload-artifact@v4
         with:
-          name: aksab-release-files
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/bundle/release/app-release.aab
+          name: aksab-release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
