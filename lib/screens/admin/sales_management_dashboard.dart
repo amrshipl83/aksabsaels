@@ -11,7 +11,7 @@ import 'sales_orders_report_screen.dart';
 import 'customers_report_screen.dart';
 import 'offers_screen.dart';
 import 'profile_screen.dart'; 
-import '../rep/shira_voice_chat_widget.dart'; // ✅ استيراد ويدجت شيرا الصوتية
+import '../rep/shira_voice_chat_widget.dart';
 
 class SalesManagementDashboard extends StatefulWidget {
   const SalesManagementDashboard({super.key});
@@ -203,18 +203,88 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
           );
         }),
         actions: [
-          IconButton(
-            icon: Icon(Icons.psychology_rounded, color: kPrimaryColor, size: 24.sp),
-            tooltip: "المساعد الذكي شيرا",
-            onPressed: _openShiraVoiceChat,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10.0),
+            child: GestureDetector(
+              onTap: _openShiraVoiceChat,
+              child: Tooltip(
+                message: "المساعد الذكي شيرا",
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: kPrimaryColor, width: 1.5),
+                  ),
+                  child: ClipOval(
+                    child: Image.asset(
+                      'assets/images/shira_logo.png',
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => 
+                          Icon(Icons.psychology_rounded, color: kPrimaryColor, size: 22.sp),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
       drawer: _buildDrawer(staffTitle),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openShiraVoiceChat,
-        backgroundColor: kPrimaryColor,
-        child: const Icon(Icons.mic, color: Colors.white),
+      floatingActionButton: GestureDetector(
+        onTap: _openShiraVoiceChat,
+        child: Hero(
+          tag: "sales_dashboard_shira_btn",
+          child: Container(
+            width: 65,
+            height: 65,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [kPrimaryColor, const Color(0xFF2F3542)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: kPrimaryColor.withOpacity(0.4),
+                  blurRadius: 12,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+              border: Border.all(color: Colors.white, width: 2),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                ClipOval(
+                  child: Image.asset(
+                    'assets/images/shira_logo.png',
+                    width: 52,
+                    height: 52,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => 
+                        const Icon(Icons.mic, color: Colors.white, size: 28),
+                  ),
+                ),
+                Positioned(
+                  top: 3,
+                  right: 3,
+                  child: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2ECC71),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(

@@ -67,6 +67,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
+    - assets/images/  # 👈 تم تعريف مجلد الصور هنا لضمان قراءة صورة shira_logo.png
     # ملف حدود الإسكندرية لاستخدامه في لوحة تحكم المشرف والمدير
     - assets/OSMB-bc319d822a17aa9ad1089fc05e7d4e752460f877.geojson
 
