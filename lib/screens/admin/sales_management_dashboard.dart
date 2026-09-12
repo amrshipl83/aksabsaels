@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; // ✅ استيراد للإشعارات
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
 
@@ -11,6 +11,7 @@ import 'sales_orders_report_screen.dart';
 import 'customers_report_screen.dart';
 import 'offers_screen.dart';
 import 'profile_screen.dart'; 
+import '../rep/shira_voice_chat_widget.dart'; // ✅ استيراد ويدجت شيرا الصوتية
 
 class SalesManagementDashboard extends StatefulWidget {
   const SalesManagementDashboard({super.key});
@@ -38,7 +39,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   void initState() {
     super.initState();
     _initDashboard();
-    _setupNotifications(); // ✅ تفعيل طلب إذن الإشعارات للإدارة عند الدخول
+    _setupNotifications();
   }
 
   // --- 🔔 تأمين طلب الإشعارات للمديرين والمشرفين ---
@@ -46,7 +47,6 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
     NotificationSettings settings = await messaging.getNotificationSettings();
 
-    // إذا لم يكن الإذن "مسموحاً" بالفعل
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
       if (mounted) {
         bool? startRequest = await showDialog<bool>(
@@ -155,6 +155,28 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     }
   }
 
+  // --- 🎙️ فتح شاشة المساعد الصوتي شيرا مع تمرير المعطيات المطلوبة ---
+  void _openShiraVoiceChat() {
+    String userRole = _userData?['role'] ?? 'sales_supervisor';
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: 85.h,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+        ),
+        child: ShiraVoiceChatWidget(
+          cloudFunctionUrl: 'https://shirachat-tmfag3rhdq-uc.a.run.app',
+          userRole: userRole,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -180,8 +202,20 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             onPressed: () => Scaffold.of(context).openDrawer(),
           );
         }),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.psychology_rounded, color: kPrimaryColor, size: 24.sp),
+            tooltip: "المساعد الذكي شيرا",
+            onPressed: _openShiraVoiceChat,
+          ),
+        ],
       ),
       drawer: _buildDrawer(staffTitle),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _openShiraVoiceChat,
+        backgroundColor: kPrimaryColor,
+        child: const Icon(Icons.mic, color: Colors.white),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: EdgeInsets.symmetric(horizontal: 5.w, vertical: 2.h),
@@ -208,6 +242,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               SizedBox(height: 4.h),
               Text("الوصول السريع", style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: kSidebarColor.withOpacity(0.8))),
               SizedBox(height: 1.5.h),
+              _buildQuickAction(Icons.psychology_rounded, "المساعد الصوتي شيرا (AI)", _openShiraVoiceChat),
               _buildQuickAction(Icons.card_giftcard_rounded, "مركز العروض والجوائز", () {
                 Navigator.push(context, MaterialPageRoute(builder: (context) => const OffersScreen()));
               }),
@@ -327,6 +362,10 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               padding: EdgeInsets.symmetric(vertical: 2.h),
               children: [
                 _drawerItem(Icons.dashboard_customize_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
+                _drawerItem(Icons.psychology_rounded, "المساعد الذكي شيرا", false, color: kPrimaryColor, onTap: () {
+                  Navigator.pop(context);
+                  _openShiraVoiceChat();
+                }),
                 _drawerItem(Icons.account_circle_outlined, "الملف الشخصي والإعدادات", false, onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen()));
@@ -370,4 +409,3 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     );
   }
 }
-
