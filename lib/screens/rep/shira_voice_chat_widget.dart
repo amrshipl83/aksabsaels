@@ -93,6 +93,15 @@ class _ShiraVoiceChatWidgetState extends State<ShiraVoiceChatWidget> {
     });
   }
 
+  // تبديل حالة التسجيل الضغط السريع أو المطول
+  Future<void> _toggleRecording() async {
+    if (_isRecording) {
+      await _stopAndSendRecording();
+    } else {
+      await _startRecording();
+    }
+  }
+
   // بدء التسجيل الصوتي
   Future<void> _startRecording() async {
     try {
@@ -105,6 +114,10 @@ class _ShiraVoiceChatWidgetState extends State<ShiraVoiceChatWidget> {
           path: filePath,
         );
         setState(() => _isRecording = true);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("يرجى منح صلاحية استخدام الميكروفون للتسجيل")),
+        );
       }
     } catch (e) {
       debugPrint("خطأ أثناء بدء التسجيل: $e");
@@ -188,7 +201,6 @@ class _ShiraVoiceChatWidgetState extends State<ShiraVoiceChatWidget> {
           ));
         });
 
-        // تشغيل صوت الرد تلقائياً إذا وُجد
         if (audioUrl != null && audioUrl.toString().isNotEmpty) {
           _playAudio(audioUrl);
         }
@@ -228,57 +240,60 @@ class _ShiraVoiceChatWidgetState extends State<ShiraVoiceChatWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 15,
-            spreadRadius: 2,
-          )
-        ],
-      ),
-      child: Column(
-        children: [
-          // شريط العنوان العلوي
-          _buildHeader(),
-          const Divider(height: 1),
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 15,
+              spreadRadius: 2,
+            )
+          ],
+        ),
+        child: Column(
+          children: [
+            // شريط العنوان العلوي
+            _buildHeader(),
+            const Divider(height: 1),
 
-          // منطقة الرسائل
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                return _buildMessageBubble(_messages[index]);
-              },
-            ),
-          ),
-
-          // مؤشر التحميل
-          if (_isLoading)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: kPrimaryColor),
-                  ),
-                  SizedBox(width: 10),
-                  Text("شيرا تفكر الآن...", style: TextStyle(color: Colors.grey, fontSize: 13)),
-                ],
+            // منطقة الرسائل
+            Expanded(
+              child: ListView.builder(
+                controller: _scrollController,
+                padding: const EdgeInsets.all(16),
+                itemCount: _messages.length,
+                itemBuilder: (context, index) {
+                  return _buildMessageBubble(_messages[index]);
+                },
               ),
             ),
 
-          // شريط الإدخال والتسجيل
-          _buildInputArea(),
-        ],
+            // مؤشر التحميل
+            if (_isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: kPrimaryColor),
+                    ),
+                    SizedBox(width: 10),
+                    Text("شيرا تفكر الآن...", style: TextStyle(color: Colors.grey, fontSize: 13)),
+                  ],
+                ),
+              ),
+
+            // شريط الإدخال والتسجيل
+            _buildInputArea(),
+          ],
+        ),
       ),
     );
   }
@@ -381,12 +396,13 @@ class _ShiraVoiceChatWidgetState extends State<ShiraVoiceChatWidget> {
   }
 
   Widget _buildInputArea() {
+    final double bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return Container(
       padding: EdgeInsets.only(
         left: 12,
         right: 12,
         top: 10,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 10,
+        bottom: bottomInset > 0 ? bottomInset + 10 : 12,
       ),
       color: Colors.white,
       child: Row(
@@ -412,10 +428,11 @@ class _ShiraVoiceChatWidgetState extends State<ShiraVoiceChatWidget> {
           ),
           const SizedBox(width: 8),
           
-          // زر التسجيل الصوتي بالضغط المباشر
+          // زر التسجيل الصوتي بالضغط المباشر والمطول
           GestureDetector(
-            onLongPress: _startRecording,
-            onLongPressUp: _stopAndSendRecording,
+            onTap: _toggleRecording,
+            onLongPressStart: (_) => _startRecording(),
+            onLongPressEnd: (_) => _stopAndSendRecording(),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               padding: EdgeInsets.all(_isRecording ? 14 : 10),
