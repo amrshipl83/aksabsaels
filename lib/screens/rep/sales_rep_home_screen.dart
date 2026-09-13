@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart' as ph;
-import 'package:url_launcher/url_launcher.dart'; // مضاف لفتح سياسة الخصوصية
+import 'package:url_launcher/url_launcher.dart'; 
 import 'dart:convert';
 import 'sales_rep_dashboard.dart';
 import 'visit_screen.dart';
@@ -14,8 +14,8 @@ import 'my_customers_screen.dart';
 import 'my_orders_screen.dart';
 import 'rep_store_lite_screen.dart';
 import 'rep_reports_screen.dart';
-import 'profile_screen.dart'; // مضاف لربط صفحة الملف الشخصي
-import 'wallet_screen.dart'; // مضاف لربط صفحة المحفظة
+import 'profile_screen.dart'; 
+import 'wallet_screen.dart'; 
 import '../admin/offers_screen.dart';
 import 'shira_voice_chat_widget.dart'; // استدعاء ويدجت مساعد شيرا الصوتي
 
@@ -219,7 +219,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
         return FractionallySizedBox(
           heightFactor: 0.85,
           child: ShiraVoiceChatWidget(
-            cloudFunctionUrl: 'https://shirachat-tmfag3rhdq-uc.a.run.app', // استبدل بالرابط المباشر للـ Cloud Function الخاصة بك
+            cloudFunctionUrl: 'https://shirachat-tmfag3rhdq-uc.a.run.app',
             userRole: repData?['role'] ?? 'sales_representative',
           ),
         );
@@ -240,7 +240,9 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
           backgroundColor: Colors.white,
           foregroundColor: kSecondaryColor,
           elevation: 0,
-          actions: [IconButton(icon: const Icon(Icons.sync_rounded), onPressed: _checkDayStatus)],
+          actions: [
+            IconButton(icon: const Icon(Icons.sync_rounded), onPressed: _checkDayStatus),
+          ],
         ),
         body: SafeArea(
           child: RefreshIndicator(
@@ -272,14 +274,62 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
           ),
         ),
 
-        // --- زر المساعد الصوتي (شيرا) العائم ---
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _openShiraVoiceAssistant,
-          backgroundColor: kPrimaryColor,
-          icon: const Icon(Icons.graphic_eq_rounded, color: Colors.white),
-          label: const Text(
-            'مساعد شيرا',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        // --- 🚀 زر المساعد الصوتي (شيرا) العائم باللوجو والتصميم الجديد ---
+        floatingActionButton: GestureDetector(
+          onTap: _openShiraVoiceAssistant,
+          child: Hero(
+            tag: "rep_home_shira_btn",
+            child: Container(
+              width: 65,
+              height: 65,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  colors: [kPrimaryColor, kSecondaryColor],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: kPrimaryColor.withOpacity(0.4),
+                    blurRadius: 12,
+                    spreadRadius: 2,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // عرض صورة لوجو شيرا
+                  ClipOval(
+                    child: Image.asset(
+                      'assets/images/shira_logo.png',
+                      width: 52,
+                      height: 52,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => 
+                          const Icon(Icons.mic, color: Colors.white, size: 28),
+                    ),
+                  ),
+                  // نقطة الاتصال التفاعلية
+                  Positioned(
+                    top: 3,
+                    right: 3,
+                    child: Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2E7D32),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -341,6 +391,27 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
             Expanded(
               child: ListView(children: [
                 _drawerItem(Icons.dashboard_outlined, "الرئيسية", true, onTap: () => Navigator.pop(context)),
+                // 🤖 إضافة خيار المساعد الذكي شيرا بالصورة التفاعلية داخل القائمة
+                ListTile(
+                  leading: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: const BoxDecoration(shape: BoxShape.circle),
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/images/shira_logo.png',
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => 
+                            const Icon(Icons.psychology, color: kPrimaryColor),
+                      ),
+                    ),
+                  ),
+                  title: const Text("المساعد الذكي شيرا", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _openShiraVoiceAssistant();
+                  },
+                ),
                 _drawerItem(Icons.account_circle_outlined, "حسابي والإعدادات", false, onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen()));
