@@ -1,6 +1,8 @@
 // lib/screens/rep/add_new_customer_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import '../../firebase_options.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
@@ -106,10 +108,21 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
       String generatedPassword = "Rabia_$cleanPhone";
 
       // 1. إنشاء الحساب في Firebase Authentication بالمعادلة الموحدة
-      UserCredential userCredential = await FirebaseAuth.instance
+      FirebaseApp secondaryApp;
+      try {
+        secondaryApp = Firebase.app('customerCreation');
+      } catch (_) {
+        secondaryApp = await Firebase.initializeApp(
+          name: 'customerCreation',
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      }
+      final FirebaseAuth secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+      UserCredential userCredential = await secondaryAuth
           .createUserWithEmailAndPassword(email: smartEmail, password: generatedPassword);
 
       String userId = userCredential.user!.uid;
+      await secondaryAuth.signOut();
 
       // 2. تجهيز ماب البيانات (نسخة طبق الأصل من الأساسي + بيانات المندوب) دون أي اختصارات
       final Map<String, dynamic> userData = {
