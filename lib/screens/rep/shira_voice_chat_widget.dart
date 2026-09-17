@@ -6,6 +6,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 const Color kPrimaryColor = Color(0xFF43B97F);
 const Color kSecondaryColor = Color(0xFF1A2C3D);
@@ -156,18 +157,27 @@ class _ShiraVoiceChatWidgetState extends State<ShiraVoiceChatWidget> {
     _scrollToBottom();
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final userDataString = prefs.getString('userData');
-      String uid = "";
-      if (userDataString != null) {
-        final userData = jsonDecode(userDataString);
-        uid = userData['uid'] ?? userData['id'] ?? userData['repCode'] ?? '';
-      }
+      final currentUser = FirebaseAuth.instance.currentUser;
+
+if (currentUser == null) {
+  _addErrorResponse("انتهت جلسة تسجيل الدخول، يرجى تسجيل الدخول مرة أخرى.");
+  return;
+}
+
+final idToken = await currentUser.getIdToken();
+
+if (idToken == null || idToken.isEmpty) {
+  _addErrorResponse("تعذر تأمين الاتصال بشيرا، يرجى تسجيل الدخول مرة أخرى.");
+  return;
+}
+
+final uid = currentUser.uid;
 
       var request = http.MultipartRequest(
         'POST',
         Uri.parse(widget.cloudFunctionUrl),
       );
+      request.headers['Authorization'] = 'Bearer $idToken';
 
       request.fields['uid'] = uid;
       request.fields['role'] = widget.userRole;
