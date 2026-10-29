@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../services/session_service.dart';
+import '../../utils/firestore_helpers.dart';
 
 // استخدام نفس الثوابت اللونية للهوية
 const Color kPrimaryColor = Color(0xFFB21F2D);
@@ -14,10 +16,39 @@ class WalletScreen extends StatefulWidget {
 }
 
 class _WalletScreenState extends State<WalletScreen> {
-  final user = FirebaseAuth.instance.currentUser;
   final _amountController = TextEditingController();
   final _accountController = TextEditingController();
   bool _isLoading = false;
+  String? _repDocId;
+  bool _resolvingDoc = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveDocId();
+  }
+
+  Future<void> _resolveDocId() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) setState(() => _resolvingDoc = false);
+      return;
+    }
+    final docId = await SessionService.resolveSalesRepDocId(user.uid);
+    if (mounted) {
+      setState(() {
+        _repDocId = docId;
+        _resolvingDoc = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _accountController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,13 +63,22 @@ class _WalletScreenState extends State<WalletScreen> {
           backgroundColor: Colors.white,
           foregroundColor: kSecondaryColor,
         ),
-        body: StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance.collection('salesRep').doc(user?.uid).snapshots(),
+        body: _resolvingDoc
+            ? const Center(child: CircularProgressIndicator(color: kPrimaryColor))
+            : _repDocId == null
+                ? const Center(child: Text("تعذر ربط حساب المحفظة. أعد تسجيل الدخول."))
+                : StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance.collection('salesRep').doc(_repDocId).snapshots(),
           builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return const Center(child: Text("حدث خطأ في جلب المحفظة"));
+            }
             if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: kPrimaryColor));
-            
+            if (!snapshot.data!.exists) {
+              return const Center(child: Text("بيانات المحفظة غير موجودة"));
+            }
             var data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
-            double balance = (data['walletBalance'] ?? 0).toDouble();
+            double balance = ((data['walletBalance'] ?? 0) as num).toDouble();
             String name = data['fullname'] ?? "مندوب مبيعات";
             String phone = data['phone'] ?? "";
 
@@ -155,7 +195,7 @@ class _WalletScreenState extends State<WalletScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text("طلب تسوية رصيد", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Text("طلب تسوية رصيد", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 25),
             TextField(
               controller: _amountController,
@@ -184,8 +224,8 @@ class _WalletScreenState extends State<WalletScreen> {
                 minimumSize: const Size(double.infinity, 55),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
               ),
-              child: _isLoading 
-                  ? const CircularProgressIndicator(color: Colors.white) 
+              child: _isLoading
+                  ? const CircularProgressIndicator(color: Colors.white)
                   : const Text("تأكيد طلب السحب", style: TextStyle(fontSize: 17, color: Colors.white)),
             ),
             const SizedBox(height: 30),
@@ -196,41 +236,98 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   Future<void> _processWithdraw(double balance, String name, String phone) async {
-    double amount = double.tryParse(_amountController.text) ?? 0;
-    if (amount <= 0 || amount > balance) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("عذراً، الرصيد غير كافٍ")));
+    final validation = validateWithdrawAmount(_amountController.text, balance);
+    if (validation != null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(validation)));
       return;
     }
+    final accountValidation = validateAccountNumber(_accountController.text);
+    if (accountValidation != null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(accountValidation)));
+      return;
+    }
+    final account = normalizeEgyptianWallet(_accountController.text);
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || _repDocId == null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("انتهت الجلسة. أعد تسجيل الدخول.")));
+      return;
+    }
+    final double? parsed = double.tryParse(_amountController.text.trim());
+    if (parsed == null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("أدخل مبلغاً صحيحاً")));
+      return;
+    }
+    final double amount = parsed;
 
-    setState(() => _isLoading = true);
+    if (mounted) setState(() => _isLoading = true);
     try {
-      await FirebaseFirestore.instance.collection('withdrawRequests').add({
-        "accountNumber": _accountController.text,
-        "amount": amount,
-        "driverId": user?.uid,
-        "driverName": name,
-        "driverPhone": phone,
-        "userRole": "salesRep",
-        "status": "pending",
-        "type": "EARNINGS_SETTLEMENT",
-        "isAmountHeld": true,
-        "processedByEngine": false,
-        "createdAt": FieldValue.serverTimestamp(),
+      // Duplicate guard (best-effort client-side): one pending request at a time.
+      // Server Rules + backend remain the authoritative enforcement.
+      final pending = await FirebaseFirestore.instance
+          .collection('withdrawRequests')
+          .where('salesRepDocId', isEqualTo: _repDocId)
+          .where('status', isEqualTo: 'pending')
+          .limit(1)
+          .get();
+      if (hasBlockingPendingRequest(pendingCount: pending.docs.length)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("لديك طلب معلق بالفعل. انتظر مراجعته قبل طلب جديد.")));
+        }
+        return;
+      }
+      final repRef = FirebaseFirestore.instance.collection('salesRep').doc(_repDocId);
+      final reqRef = FirebaseFirestore.instance.collection('withdrawRequests').doc();
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final snap = await tx.get(repRef);
+        if (!snap.exists) throw Exception('missing-wallet');
+        final data = snap.data();
+        // Identity binding: the wallet doc must belong to the signed-in rep.
+        if (data == null || data['uid']?.toString() != user.uid) {
+          throw Exception('identity-mismatch');
+        }
+        final current = ((data['walletBalance'] ?? 0) as num).toDouble();
+        if (current < amount) throw Exception('insufficient');
+        tx.set(reqRef, {
+          "accountNumber": account,
+          "amount": amount,
+          "driverId": user.uid,
+          "salesRepDocId": _repDocId,
+          "driverName": name,
+          "driverPhone": phone,
+          "userRole": "salesRep",
+          "status": "pending",
+          "type": "EARNINGS_SETTLEMENT",
+          "isAmountHeld": true,
+          "processedByEngine": false,
+          "requestId": reqRef.id,
+          "createdAt": FieldValue.serverTimestamp(),
+        });
+        tx.update(repRef, {'walletBalance': FieldValue.increment(-amount)});
       });
 
-      await FirebaseFirestore.instance.collection('salesRep').doc(user?.uid).update({
-        'walletBalance': FieldValue.increment(-amount)
-      });
-
-      Navigator.pop(context);
+      if (mounted) Navigator.pop(context);
       _amountController.clear();
       _accountController.clear();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(backgroundColor: Colors.green, content: Text("تم إرسال طلب السحب بنجاح!")));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(backgroundColor: Colors.green, content: Text("تم إرسال طلب السحب بنجاح!")));
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("حدث خطأ، حاول لاحقاً")));
+      if (mounted) {
+        final text = e.toString();
+        final msg = text.contains('insufficient')
+            ? "عذراً، الرصيد غير كافٍ"
+            : text.contains('identity-mismatch')
+                ? "تعذر ربط المحفظة بحسابك. أعد تسجيل الدخول."
+                : text.contains('missing-wallet')
+                    ? "بيانات المحفظة غير موجودة."
+                    : text.contains('permission-denied')
+                        ? "مرفوض من قواعد الصلاحيات. أعد تسجيل الدخول وحاول مجدداً."
+                        : "حدث خطأ، حاول لاحقاً";
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 }
-

@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:sizer/sizer.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -12,11 +14,39 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final User? user = FirebaseAuth.instance.currentUser;
+  String? _repDocId;
+  bool _resolvingDoc = true;
   bool _isLoading = false;
 
   // رابط نموذج حذف البيانات (متطلب جوجل)
   final String deleteDataUrl = "https://docs.google.com/forms/d/e/YOUR_FORM_ID/viewform";
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveDocId();
+  }
+
+  Future<void> _resolveDocId() async {
+    final user = FirebaseAuth.instance.currentUser;
+    String? docId;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('userData');
+      if (raw != null && user != null) {
+        final local = jsonDecode(raw) as Map<String, dynamic>;
+        final stored = local['docId']?.toString();
+        if (stored != null && stored.isNotEmpty) docId = stored;
+      }
+    } catch (_) {}
+    if (docId == null && user != null) {
+      try {
+        final q = await FirebaseFirestore.instance.collection('salesRep').where('uid', isEqualTo: user.uid).limit(1).get();
+        if (q.docs.isNotEmpty) docId = q.docs.first.id;
+      } catch (_) {}
+    }
+    if (mounted) setState(() { _repDocId = docId; _resolvingDoc = false; });
+  }
 
   Future<void> _launchUrl() async {
     final Uri url = Uri.parse(deleteDataUrl);
@@ -40,8 +70,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
           foregroundColor: const Color(0xFF2F3542),
           elevation: 0.5,
         ),
-        body: StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance.collection('salesRep').doc(user?.uid).snapshots(),
+        body: _resolvingDoc
+            ? const Center(child: CircularProgressIndicator())
+            : _repDocId == null
+                ? const Center(child: Text("تعذر ربط الحساب. أعد تسجيل الدخول."))
+                : StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance.collection('salesRep').doc(_repDocId).snapshots(),
           builder: (context, snapshot) {
             if (snapshot.hasError) return const Center(child: Text("حدث خطأ في جلب البيانات"));
             if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());

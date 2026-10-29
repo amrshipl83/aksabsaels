@@ -4,10 +4,10 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- CALL_PHONE removed: app uses ACTION_DIAL via url_launcher, no direct call -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     
-    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
+    <!-- AD_ID removed: no ads SDK in pubspec; avoids Play Ads declaration -->
 
     <application
         android:label="أكسب للمبيعات"

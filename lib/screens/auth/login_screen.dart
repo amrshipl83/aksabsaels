@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'dart:convert';
 import 'register_screen.dart';
+import 'package:aksab_sales/services/session_service.dart';
 
 // --- الهوية البصرية الجديدة لأكسب ---
 const Color kPrimaryColor = Color(0xFFB21F2D); // أحمر أكسب المعتمد
@@ -64,6 +65,18 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _checkExistingLogin() async {
+    if (FirebaseAuth.instance.currentUser == null) {
+      final p = await SharedPreferences.getInstance();
+      await p.remove('userRole');
+      await p.remove('userData');
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+    if (!await SessionService.isSessionValid()) {
+      await SessionService.clearSession();
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     final String? userRole = prefs.getString('userRole');
     final String? userData = prefs.getString('userData');

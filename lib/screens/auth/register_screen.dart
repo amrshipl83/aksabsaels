@@ -1,7 +1,6 @@
 // lib/screens/auth/register_screen.dart
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:aksab_sales/services/akedly_register_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -13,11 +12,11 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _passwordController = TextEditingController();
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
 
   String _selectedRole = 'sales_rep';
+  final AkedlyRegisterService _regService = AkedlyRegisterService();
   bool _isLoading = false;
   String? _message;
   bool _isSuccess = false;
@@ -34,10 +33,38 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   void dispose() {
     _nameController.dispose();
-    _passwordController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
     super.dispose();
+  }
+
+  Future<String?> _promptOtpDialog() {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('كود التفعيل', style: TextStyle(fontFamily: 'Cairo'), textAlign: TextAlign.center),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          maxLength: 10,
+          textAlign: TextAlign.center,
+          decoration: const InputDecoration(hintText: 'أدخل الكود المرسل لهاتفك'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('إلغاء', style: TextStyle(fontFamily: 'Cairo')),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            style: ElevatedButton.styleFrom(backgroundColor: aksabRed),
+            child: const Text('تأكيد', style: TextStyle(fontFamily: 'Cairo')),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _register() async {
@@ -49,56 +76,66 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
 
     String phone = _phoneController.text.trim();
-    // استخدام النطاق الجديد للفصل بين المنصات
-    String smartEmail = "$phone@aksabsales.com";
-    String password = _passwordController.text;
+
+    setState(() {
+      _isLoading = true;
+      _message = null;
+    });
 
     try {
-      // 1. إنشاء الحساب في Firebase Auth باستخدام الإيميل الذكي والباسوورد المدخلة من المستخدم
-      final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: smartEmail,
-        password: password,
+      // F3: step 1 - backend OTP-proves the unknown phone, binds role server-side.
+      final send = await _regService.registerSend(phone, _selectedRole);
+      if (!send.isSuccess) {
+        setState(() {
+          _isSuccess = false;
+          _message = send.message ?? '❌ تعذّر بدء التسجيل.';
+        });
+        return;
+      }
+      final txID = send.data ?? '';
+      if (txID.isEmpty) {
+        setState(() {
+          _isSuccess = false;
+          _message = '❌ تعذّر بدء التسجيل.';
+        });
+        return;
+      }
+
+      final otp = await _promptOtpDialog();
+      if (otp == null || otp.isEmpty) return;
+
+      // F3: step 2 - server creates the passwordless identity in the bound queue.
+      await _regService.registerVerify(
+        transactionReqID: txID,
+        otp: otp,
+        phoneNumber: phone,
+        profile: {
+          'fullname': _nameController.text.trim(),
+          'address': _addressController.text.trim(),
+        },
       );
-
-      final String uid = userCredential.user!.uid;
-
-      // 2. تحديد الكولكشن المناسب (pendingReps للمندوب و pendingManagers للمشرف والمدير)
-      String collectionName = (_selectedRole == "sales_rep") ? "pendingReps" : "pendingManagers";
-
-      // 3. حفظ البيانات كاملة في Firestore (تمت إزالة أي استدعاء أو ربط بأمازون تماماً)
-      await FirebaseFirestore.instance.collection(collectionName).doc(uid).set({
-        'uid': uid,
-        'fullname': _nameController.text.trim(),
-        'email': smartEmail,
-        'phone': phone,
-        'address': _addressController.text.trim(),
-        'role': _selectedRole,
-        'status': "pending",
-        'createdAt': FieldValue.serverTimestamp(),
-        'appType': 'sales', // لتمييز الطلب مستقبلاً داخل لوحة التحكم لـ Flutter Web
-      });
 
       setState(() {
         _isSuccess = true;
-        _message = "✅ تم التسجيل بنجاح كـ ${_roles[_selectedRole]}، في انتظار موافقة الإدارة.";
+        _message = '✅ تم إرسال طلبك بنجاح، في انتظار موافقة الإدارة.';
       });
 
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted) Navigator.pop(context);
       });
-    } on FirebaseAuthException catch (e) {
+    } on RegisterException catch (e) {
       setState(() {
         _isSuccess = false;
-        if (e.code == 'email-already-in-use') {
-          _message = "❌ رقم الهاتف هذا مسجل به حساب مندوب بالفعل.";
+        if (e.statusCode == 409) {
+          _message = '❌ رقم الهاتف هذا مسجل بالفعل.';
         } else {
-          _message = "❌ خطأ في التسجيل: ${e.message}";
+          _message = '❌ تعذّر إتمام التسجيل حاليًا.';
         }
       });
     } catch (e) {
       setState(() {
         _isSuccess = false;
-        _message = "❌ حدث خطأ غير متوقع: ${e.toString()}";
+        _message = '❌ حدث خطأ غير متوقع.';
       });
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -138,7 +175,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     const SizedBox(height: 20),
                     _buildField(_nameController, "الاسم بالكامل", Icons.person),
                     _buildField(_phoneController, "رقم الهاتف", Icons.phone, isPhone: true),
-                    _buildField(_passwordController, "كلمة المرور", Icons.lock, isPass: true),
                     _buildField(_addressController, "محل الإقامة / المنطقة", Icons.location_on),
                     const Divider(height: 30),
                     const Text(

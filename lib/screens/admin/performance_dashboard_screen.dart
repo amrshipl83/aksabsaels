@@ -62,11 +62,16 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         targets = repDoc.data()?['targets'] ?? {};
       }
 
-      if (codesToQuery.isNotEmpty) {
+      final safeCodes = codesToQuery.where((e) => e.trim().isNotEmpty).toList();
+      if (safeCodes.length > 10) {
+        debugPrint("Performance: too many repCodes (${safeCodes.length}), showing first 10 only");
+      }
+      final queryCodes = safeCodes.take(10).toList();
+      if (queryCodes.isNotEmpty) {
         // 2. جلب الأوردرات
         var orders = await FirebaseFirestore.instance
             .collection('orders')
-            .where('buyer.repCode', whereIn: codesToQuery)
+            .where('buyer.repCode', whereIn: queryCodes)
             .where('orderDate', isGreaterThanOrEqualTo: Timestamp.fromDate(_startDate))
             .where('orderDate', isLessThanOrEqualTo: Timestamp.fromDate(_endDate.add(const Duration(days: 1))))
             .get();
@@ -74,33 +79,38 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         double salesSum = 0;
         Set<String> buyersSet = {};
         for (var doc in orders.docs) {
-          salesSum += (doc['total'] ?? 0).toDouble();
-          if (doc['buyer']?['id'] != null) buyersSet.add(doc['buyer']['id']);
+          final total = (doc.data()['total'] ?? 0);
+          salesSum += ((total is num) ? total.toDouble() : 0);
+          if (doc['buyer']?['id'] != null) buyersSet.add(doc['buyer']['id'].toString());
         }
 
-        // 3. جلب الزيارات
+        // 3. جلب الزيارات (الحقل الفعلي startTime وليس timestamp)
         var visits = await FirebaseFirestore.instance
             .collection('visits')
-            .where('repCode', whereIn: codesToQuery)
-            .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(_startDate))
-            .where('timestamp', isLessThanOrEqualTo: Timestamp.fromDate(_endDate.add(const Duration(days: 1))))
+            .where('repCode', whereIn: queryCodes)
+            .where('startTime', isGreaterThanOrEqualTo: Timestamp.fromDate(_startDate))
+            .where('startTime', isLessThanOrEqualTo: Timestamp.fromDate(_endDate.add(const Duration(days: 1))))
             .get();
 
         // 4. جلب ساعات العمل
         var logs = await FirebaseFirestore.instance
             .collection('daily_logs')
-            .where('repCode', whereIn: codesToQuery)
+            .where('repCode', whereIn: queryCodes)
             .where('startTime', isGreaterThanOrEqualTo: Timestamp.fromDate(_startDate))
             .get();
 
         double hours = 0;
         for (var log in logs.docs) {
           var data = log.data();
-          if (data['startTime'] != null && data['endTime'] != null) {
-            DateTime start = (data['startTime'] as Timestamp).toDate();
-            DateTime end = (data['endTime'] as Timestamp).toDate();
-            hours += end.difference(start).inMinutes / 60;
-          }
+          try {
+            if (data['startTime'] != null && data['endTime'] != null) {
+              DateTime start = (data['startTime'] as Timestamp).toDate();
+              DateTime end = (data['endTime'] as Timestamp).toDate();
+              if (!end.isBefore(start)) {
+                hours += end.difference(start).inMinutes / 60;
+              }
+            }
+          } catch (_) {}
         }
 
         if (mounted) {
@@ -112,9 +122,22 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
             workingHours = hours;
           });
         }
+      } else if (mounted) {
+        setState(() {
+          totalSales = 0;
+          totalOrders = 0;
+          activeCustomers = 0;
+          executedVisits = 0;
+          workingHours = 0;
+        });
       }
     } catch (e) {
       debugPrint("Error fetching performance: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("تعذر تحميل بيانات الأداء")),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -129,7 +152,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
-        title: Text("أداء ${widget.targetName}", 
+        title: Text("أداء ${widget.targetName}",
             style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
         elevation: 0.5,
         backgroundColor: Colors.white,
@@ -229,7 +252,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       crossAxisCount: 2,
       mainAxisSpacing: 15.sp,
       crossAxisSpacing: 15.sp,
-      childAspectRatio: 0.82, 
+      childAspectRatio: 0.82,
       children: [
         _kpiCard("إجمالي المبيعات", totalSales, financialGoal, isCurrency: true),
         _kpiCard("الزيارات المنفذة", executedVisits.toDouble(), visitsGoal, unit: "زيارة"),
@@ -255,7 +278,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(title, 
+          Text(title,
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11.sp, color: Colors.blueGrey, fontWeight: FontWeight.bold)),
           SizedBox(height: 10.sp),
@@ -297,4 +320,3 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     );
   }
 }
-

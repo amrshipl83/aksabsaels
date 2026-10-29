@@ -120,6 +120,7 @@ class _CustomersReportScreenState extends State<CustomersReportScreen> {
   }
 
   Widget _buildCustomersStream() {
+    if (_targetRepCodes.length > 10) return _emptyState("عدد المناديب كبير. حدد نطاقاً أصغر لعرض العملاء.");
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('users')

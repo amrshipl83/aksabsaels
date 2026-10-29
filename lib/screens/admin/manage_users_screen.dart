@@ -105,6 +105,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
   }
 
   Widget _buildAllRepsForManager() {
+    if (_mySupervisorsIds.length > 10) return Center(child: Text("عدد المشرفين كبير. راجع التقسيم الإداري.", style: TextStyle(fontSize: 14.sp)));
     if (_mySupervisorsIds.isEmpty) {
       return Center(child: Text("لا يوجد مشرفين تابعين لك حالياً", style: TextStyle(fontSize: 14.sp)));
     }
@@ -157,7 +158,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
     bool canIEditTarget = false;
     if (_userData?['role'] == 'sales_manager' && collection == 'managers') {
       canIEditTarget = true;
-    } else if (_userData?['role'] == 'supervisor' && collection == 'salesRep') {
+    } else if (_userData?['role'] == 'sales_supervisor' && collection == 'salesRep') {
       canIEditTarget = true;
     }
 

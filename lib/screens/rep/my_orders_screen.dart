@@ -18,7 +18,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
   bool _isMoreLoading = false;
   bool _hasMore = true;
   DocumentSnapshot? _lastDocument;
-  
+
   List<Map<String, dynamic>> _allOrders = [];
   Map<String, dynamic>? _userData;
   String? _indexErrorUrl;
@@ -41,25 +41,75 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     _loadOrders(isRefresh: true);
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  String _safeId(String id) => id.length <= 5 ? id : id.substring(0, 5);
+
+  String _safeDate(dynamic orderDate) {
+    try {
+      if (orderDate == null) return "غير متوفر";
+      if (orderDate is Timestamp) {
+        return intl.DateFormat('yyyy-MM-dd').format(orderDate.toDate());
+      }
+      if (orderDate is String) {
+        return intl.DateFormat('yyyy-MM-dd').format(DateTime.parse(orderDate));
+      }
+      if (orderDate is DateTime) {
+        return intl.DateFormat('yyyy-MM-dd').format(orderDate);
+      }
+      return "غير متوفر";
+    } catch (_) {
+      return "غير متوفر";
+    }
+  }
+
+  void _failStop() {
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _isMoreLoading = false;
+        _hasMore = false;
+      });
+    }
+  }
+
   Future<void> _loadOrders({bool isRefresh = false}) async {
     if (isRefresh) {
-      setState(() {
-        _isLoading = true;
-        _allOrders = [];
-        _lastDocument = null;
-        _hasMore = true;
-        _indexErrorUrl = null;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = true;
+          _allOrders = [];
+          _lastDocument = null;
+          _hasMore = true;
+          _indexErrorUrl = null;
+        });
+      }
     } else {
-      setState(() => _isMoreLoading = true);
+      if (mounted) setState(() => _isMoreLoading = true);
     }
 
     try {
       final prefs = await SharedPreferences.getInstance();
       final userDataString = prefs.getString('userData');
-      if (userDataString == null) return;
-      _userData = jsonDecode(userDataString);
-      final String repCode = _userData!['repCode'];
+      if (userDataString == null) {
+        _failStop();
+        return;
+      }
+      try {
+        _userData = jsonDecode(userDataString) as Map<String, dynamic>;
+      } catch (_) {
+        _failStop();
+        return;
+      }
+      final String repCode = (_userData!['repCode']?.toString() ?? '').trim();
+      if (repCode.isEmpty) {
+        _failStop();
+        return;
+      }
 
       Query query = _db.collection("orders")
           .where("buyer.repCode", isEqualTo: repCode)
@@ -75,6 +125,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
 
       final querySnapshot = await query.limit(20).get();
 
+      if (!mounted) return;
       if (querySnapshot.docs.length < 20) {
         _hasMore = false;
       }
@@ -111,10 +162,15 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       _indexErrorUrl = regExp.stringMatch(errorMsg);
     }
     debugPrint("Order Loading Error: $e");
-    setState(() {
-      _isLoading = false;
-      _isMoreLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _isMoreLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("تعذر تحميل الطلبات. تحقق من الاتصال أو الفلاتر.")),
+      );
+    }
   }
 
   @override
@@ -175,7 +231,13 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         children: [
           const Text("يجب تفعيل 'الفهرسة' لتشغيل الفلاتر المتقدمة", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
           TextButton.icon(
-            onPressed: () => launchUrl(Uri.parse(_indexErrorUrl!)),
+            onPressed: () async {
+              final uri = Uri.tryParse(_indexErrorUrl ?? '');
+              if (uri == null) return;
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
             icon: const Icon(Icons.settings_input_component),
             label: const Text("تفعيل الإندكس الآن"),
           )
@@ -196,7 +258,8 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
               value: _selectedStatus,
               items: _statusMap.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, style: const TextStyle(fontSize: 13)))).toList(),
               onChanged: (val) {
-                setState(() => _selectedStatus = val!);
+                if (val == null) return;
+                if (mounted) setState(() => _selectedStatus = val);
                 _loadOrders(isRefresh: true);
               },
               decoration: const InputDecoration(labelText: "حالة الطلب", contentPadding: EdgeInsets.symmetric(horizontal: 10), border: OutlineInputBorder()),
@@ -217,7 +280,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       child: _isMoreLoading
           ? const Center(child: CircularProgressIndicator())
           : ElevatedButton(
-              onPressed: () => _loadOrders(),
+              onPressed: _isMoreLoading ? null : () => _loadOrders(),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black87),
               child: const Text("عرض المزيد"),
             ),
@@ -227,9 +290,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
   Widget _buildOrderCard(Map<String, dynamic> order) {
     bool isDelivered = order['status'] == 'delivered';
     Color statusColor = isDelivered ? Colors.green : (order['status'] == 'cancelled' ? Colors.red : Colors.orange);
-    String dateStr = order['orderDate'] != null
-        ? intl.DateFormat('yyyy-MM-dd').format((order['orderDate'] as Timestamp).toDate())
-        : "غير متوفر";
+    String dateStr = _safeDate(order['orderDate']);
 
     return Card(
       elevation: 2,
@@ -248,8 +309,8 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         title: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text("طلب #${order['id'].toString().substring(0, 5)}", style: const TextStyle(fontWeight: FontWeight.bold)),
-            Text("${order['total']} ج.م", style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF43B97F))),
+            Text("طلب #${_safeId(order['id']?.toString() ?? '')}", style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text("${order['total'] ?? '-'} ج.م", style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF43B97F))),
           ],
         ),
         subtitle: Column(
@@ -262,7 +323,10 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(5)),
-              child: Text(_statusMap[order['status']] ?? order['status'], style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.bold)),
+              child: Text(
+                _statusMap[order['status']?.toString()] ?? (order['status']?.toString() ?? 'غير معروف'),
+                style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),
@@ -290,28 +354,31 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                 children: [
                   Center(child: Container(width: 50, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)))),
                   const SizedBox(height: 20),
-                  Text("تفاصيل الطلب: ${order['id']}", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF43B97F))),
+                  Text("تفاصيل الطلب: ${order['id'] ?? ''}", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF43B97F))),
                   const Divider(),
                   _detailRow("العميل", order['buyer']?['name']),
                   _detailRow("الهاتف", order['buyer']?['phone']),
                   _detailRow("العنوان", order['buyer']?['address']),
-                  _detailRow("الحالة", _statusMap[order['status']] ?? order['status']),
-                  _detailRow("الإجمالي", "${order['total']} ج.م"),
+                  _detailRow("الحالة", _statusMap[order['status']?.toString()] ?? order['status']?.toString()),
+                  _detailRow("الإجمالي", "${order['total'] ?? '-'} ج.م"),
                   const SizedBox(height: 20),
                   const Text("المنتجات:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 10),
-                  ...(order['items'] as List? ?? []).map((item) => Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8)),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(child: Text("${item['name']}")),
-                        Text("الكمية: ${item['quantity']} | ${item['price']} ج.م"),
-                      ],
-                    ),
-                  )).toList(),
+                  ...(order['items'] as List? ?? []).map((item) {
+                    final m = (item as Map?) ?? const {};
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8)),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(child: Text("${m['name'] ?? 'منتج'}")),
+                          Text("الكمية: ${m['quantity'] ?? '-'} | ${m['price'] ?? '-'} ج.م"),
+                        ],
+                      ),
+                    );
+                  }).toList(),
                 ],
               ),
             );
@@ -333,4 +400,3 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     );
   }
 }
-

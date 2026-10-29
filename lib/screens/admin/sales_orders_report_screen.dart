@@ -255,6 +255,8 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
   }
 
   Widget _buildOrdersStream() {
+    if (_baseRepCodes.isEmpty) return _emptyState("لا يوجد مناديب مسجلين لإظهار تقاريرهم");
+    if (_baseRepCodes.length > 10) return _emptyState("عدد المناديب كبير. اختر مندوباً محدداً لعرض التقرير.");
     Query query = FirebaseFirestore.instance.collection('orders');
     query = query
         .where('orderDate', isGreaterThanOrEqualTo: Timestamp.fromDate(DateTime(_startDate.year, _startDate.month, _startDate.day)))

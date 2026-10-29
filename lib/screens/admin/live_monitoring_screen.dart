@@ -103,11 +103,14 @@ class _LiveMonitoringScreenState extends State<LiveMonitoringScreen> {
       stream: repsQuery.snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasError) return const Center(child: Text("تعذر تحميل المناديب"));
         var repsDocs = snapshot.data!.docs;
         if (repsDocs.isEmpty) return Center(child: Text("لا يوجد مندوبين مسجلين", style: TextStyle(fontSize: 15.sp)));
 
-        Map<String, dynamic> repsFullData = {for (var doc in repsDocs) doc['repCode']: doc.data()};
-        List<String> repCodes = repsFullData.keys.toList();
+        Map<String, dynamic> repsFullData = {for (var doc in repsDocs) (doc['repCode']?.toString() ?? doc.id): doc.data()};
+        List<String> repCodes = repsFullData.keys.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+        if (repCodes.length > 10) repCodes = repCodes.sublist(0, 10);
+        if (repCodes.isEmpty) return const Center(child: Text("لا يوجد مناديب تابعون"));
 
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance.collection('daily_logs').where('status', isEqualTo: 'open').where('repCode', whereIn: repCodes).snapshots(),

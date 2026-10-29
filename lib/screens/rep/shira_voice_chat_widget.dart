@@ -5,7 +5,7 @@ import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+/* shared_preferences import removed: unused in this widget */
 import 'package:firebase_auth/firebase_auth.dart';
 
 const Color kPrimaryColor = Color(0xFF43B97F);

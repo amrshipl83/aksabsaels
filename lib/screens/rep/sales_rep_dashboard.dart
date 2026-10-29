@@ -32,6 +32,7 @@ class SalesRepDashboard extends StatelessWidget {
             Expanded(
               child: _buildStatCard(
                 title: 'عملاء جدد',
+                dateField: 'createdAt',
                 collection: 'users',
                 icon: Icons.person_add_alt_1_outlined,
                 color: Colors.orange,
@@ -43,6 +44,8 @@ class SalesRepDashboard extends StatelessWidget {
         // بطاقة عريضة للطلبات
         _buildStatCard(
           title: 'طلبات اليوم',
+          repField: 'buyer.repCode',
+          dateField: 'orderDate',
           collection: 'orders',
           icon: Icons.shopping_cart_checkout_outlined,
           color: Colors.green,
@@ -58,16 +61,25 @@ class SalesRepDashboard extends StatelessWidget {
     required IconData icon,
     required Color color,
     bool isWide = false,
+    String repField = 'repCode',
+    String dateField = 'startTime',
   }) {
     return StreamBuilder<QuerySnapshot>(
       // جلب البيانات التي تخص المندوب وتمت بعد وقت بدء اليوم
       stream: FirebaseFirestore.instance
           .collection(collection)
-          .where('repCode', isEqualTo: repCode)
-          .where(collection == 'users' ? 'createdAt' : 'startTime', 
+          .where(repField, isEqualTo: repCode)
+          .where(dateField,
                  isGreaterThanOrEqualTo: Timestamp.fromDate(currentDayStartTime))
           .snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
+            child: Text("$title: تعذر التحميل", style: const TextStyle(color: Colors.grey, fontSize: 13)),
+          );
+        }
         int count = 0;
         if (snapshot.hasData) {
           count = snapshot.data!.docs.length;
