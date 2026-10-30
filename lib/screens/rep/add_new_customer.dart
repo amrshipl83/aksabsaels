@@ -1,13 +1,19 @@
 // lib/screens/rep/add_new_customer_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
-import '../../firebase_options.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:aksab_sales/utils/phone_normalize.dart';
+
+// Rep-created buyer is server-owned: the app sends the profile + the rep's
+// ID token, the backend validates, creates the passwordless Auth user and
+// the users/ buyer doc, and binds repCode/repName from the approved rep
+// record. The client never chooses repCode and never sets passwords.
+// Function is deployed separately as cashback_logic:repBuyer.
+const String kRepBuyerEndpoint =
+    'https://us-central1-aksab-erp.cloudfunctions.net/repBuyer';
 
 class AddNewCustomerScreen extends StatefulWidget {
   const AddNewCustomerScreen({super.key});
@@ -18,23 +24,21 @@ class AddNewCustomerScreen extends StatefulWidget {
 
 class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
   final _formKey = GlobalKey<FormState>();
-  
+
   // الكنترولرز مطابقة للتطبيق الأساسي لضمان نفس بنية البيانات
   final _nameController = TextEditingController();      // سيتم تخزينه في fullname
   final _ownerNameController = TextEditingController(); // اسم صاحب النشاط
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
-  
+
   bool _isLoading = false;
   Position? _currentPosition;
-  Map<String, dynamic>? _repData;
 
   @override
   void initState() {
     super.initState();
-    _loadRepData();
-    // جلب الموقع فوراً بصمت لاعتباره مأخوذ مسبقاً عند بداية اليوم
-    _determinePosition(); 
+    // جلب الموقع فوراً بصمت لاعتباره مأخوذ مسبقاً
+    _determinePosition();
   }
 
   @override
@@ -44,14 +48,6 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
     _phoneController.dispose();
     _addressController.dispose();
     super.dispose();
-  }
-
-  Future<void> _loadRepData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString('userData');
-    if (data != null) {
-      setState(() => _repData = jsonDecode(data));
-    }
   }
 
   Future<void> _determinePosition() async {
@@ -66,7 +62,7 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
       List<Placemark> placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
       String address = "موقع غير محدد";
       if (placemarks.isNotEmpty) {
-        Placemark p = placemarks[0];
+        Placemark p = placemarks.first;
         address = "${p.street}, ${p.locality}, ${p.subAdministrativeArea}";
       }
 
@@ -89,6 +85,12 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
     }
   }
 
+  /// Egyptian mobile in 0-format (010/011/012/015 + 8 digits), as the server expects.
+  /// Delegates to the shared canonical rule (see lib/utils/phone_normalize.dart):
+  /// local 01…, international 20…/+20…/0020… — all collapse to the same local
+  /// form, so one number can never produce two different accounts.
+  String? _normalizePhone(String raw) => normalizeEgyptianPhoneToLocal(raw);
+
   Future<void> _registerCustomer() async {
     // التأكد من ملء البيانات ووجود إحداثيات (اللقطة الجغرافية)
     if (!_formKey.currentState!.validate() || _currentPosition == null) {
@@ -96,65 +98,55 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
       return;
     }
 
+    final cleanPhone = _normalizePhone(_phoneController.text.trim());
+    if (cleanPhone == null) {
+      _showSnackBar("❌ رقم هاتف مصري غير صحيح (11 رقم يبدأ بـ 010/011/012/015)");
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _showSnackBar("❌ انتهت الجلسة. أعد تسجيل الدخول.");
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
-      String rawPhone = _phoneController.text.trim();
-      
-      // تنظيف وتوحيد رقم الهاتف لضمان صيغة الكود الذكي (بدءاً بـ 0) كما في موديول الدخول
-      String cleanPhone = rawPhone.startsWith('0') ? rawPhone : '0$rawPhone';
-      
-      // تطبيق المعادلة الذكية المتفق عليها خلف الكواليس بشكل آمن التزاماً بالـ OTP
-      String smartEmail = "$cleanPhone@aksab.com"; 
-      String generatedPassword = "Rabia_$cleanPhone";
-
-      // 1. إنشاء الحساب في Firebase Authentication بالمعادلة الموحدة
-      FirebaseApp secondaryApp;
-      try {
-        secondaryApp = Firebase.app('customerCreation');
-      } catch (_) {
-        secondaryApp = await Firebase.initializeApp(
-          name: 'customerCreation',
-          options: DefaultFirebaseOptions.currentPlatform,
-        );
-      }
-      final FirebaseAuth secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
-      UserCredential userCredential = await secondaryAuth
-          .createUserWithEmailAndPassword(email: smartEmail, password: generatedPassword);
-
-      String userId = userCredential.user!.uid;
-      await secondaryAuth.signOut();
-
-      // 2. تجهيز ماب البيانات (نسخة طبق الأصل من الأساسي + بيانات المندوب) دون أي اختصارات
-      final Map<String, dynamic> userData = {
-        'uid': userId,
-        'fullname': _nameController.text.trim(),   // اسم المحل
-        'ownerName': _ownerNameController.text.trim(), // اسم صاحب النشاط
-        'email': smartEmail,
-        'phone': cleanPhone, // تخزين الرقم الموحد بالصفر ليتطابق مع الـ Variations الخاصة بالـ Search
-        'address': _addressController.text.trim(),
-        'location': {
-          'lat': _currentPosition!.latitude,
-          'lng': _currentPosition!.longitude,
+      final idToken = await user.getIdToken();
+      final response = await http.post(
+        Uri.parse(kRepBuyerEndpoint),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
         },
-        'role': "buyer",       // تحديد الرول كـ تاجر (مشتري)
-        'country': "egypt",
-        'createdAt': FieldValue.serverTimestamp(),
-        'isVerified': true,    // تفعيل فوري لأن المندوب سجل العميل ميدانياً
-        'isNewUser': true,     // لضمان استحقاق نقاط الترحيب
-        'status': 'active',    // الحالة نشط
-        // إضافة معرفات المندوب لربط العميل به
-        'repCode': _repData?['repCode'],
-        'repName': _repData?['fullname'],
-      };
+        body: jsonEncode({
+          'fullname': _nameController.text.trim(),
+          'ownerName': _ownerNameController.text.trim(),
+          'phoneNumber': cleanPhone,
+          'address': _addressController.text.trim(),
+          'country': 'egypt',
+          'location': {
+            'lat': _currentPosition!.latitude,
+            'lng': _currentPosition!.longitude,
+          },
+        }),
+      );
 
-      // 3. الحفظ في كولكشن users (نفس مسار الـ Buyer في التطبيق الأساسي)
-      await FirebaseFirestore.instance.collection('users').doc(userId).set(userData);
-
+      if (response.statusCode == 200) {
+        if (mounted) _showSuccessDialog();
+        return;
+      }
       if (mounted) {
-        _showSuccessDialog();
+        final msg = switch (response.statusCode) {
+          409 => "❌ هذا الرقم مسجل بالفعل.",
+          400 => "❌ بيانات غير صالحة. راجع الاسم ورقم الهاتف.",
+          401 || 403 => "❌ الجلسة غير مخولة. أعد تسجيل الدخول.",
+          _ => "❌ تعذر التسجيل حالياً (${response.statusCode}). حاول لاحقاً.",
+        };
+        _showSnackBar(msg);
       }
     } catch (e) {
-      _showSnackBar("❌ خطأ في التسجيل: $e");
+      _showSnackBar("❌ خطأ في الاتصال: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -168,7 +160,7 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         title: const Text("تم التسجيل ✅", style: TextStyle(fontFamily: 'Cairo'), textAlign: TextAlign.center),
         content: const Text(
-          "تم إنشاء حساب العميل وتأمينه بنجاح.\nيمكن للعميل الآن تحميل التطبيق وتسجيل الدخول المباشر والآمن برقم هاتفه وكود الـ OTP فوراً.",
+          "تم إنشاء حساب العميل من الخادم وربطه بك.\nيمكن للعميل الآن تحميل التطبيق وتسجيل الدخول المباشر برقم هاتفه وكود الـ OTP فوراً.",
           style: TextStyle(fontFamily: 'Cairo'),
           textAlign: TextAlign.center,
         ),
@@ -180,7 +172,7 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
               onPressed: () {
                 Navigator.pop(context); // إغلاق التنبيه
                 Navigator.pop(context); // العودة للقائمة الرئيسية
-              }, 
+              },
               child: const Text("موافق", style: TextStyle(color: Colors.white, fontFamily: 'Cairo'))
             ),
           )
@@ -198,7 +190,7 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
-      body: _isLoading && _currentPosition == null 
+      body: _isLoading && _currentPosition == null
         ? const Center(child: CircularProgressIndicator(color: Color(0xFF2D9E68)))
         : SingleChildScrollView(
             padding: const EdgeInsets.all(20),
@@ -225,9 +217,9 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: _isLoading 
+                      child: _isLoading
                         ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text("حفظ وتأمين الحساب فوراً", 
+                        : const Text("حفظ وتأمين الحساب فوراً",
                             style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold, fontFamily: 'Cairo')),
                     ),
                   ),
@@ -238,7 +230,7 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
     );
   }
 
-  Widget _buildInput(TextEditingController controller, String label, IconData icon, 
+  Widget _buildInput(TextEditingController controller, String label, IconData icon,
       {bool readOnly = false, TextInputType keyboard = TextInputType.text}) {
     return TextFormField(
       controller: controller,
@@ -259,7 +251,7 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
       ),
       validator: (v) {
         if (label.contains('*') && (v == null || v.isEmpty)) return "هذا الحقل مطلوب";
-        if (label.contains('الهاتف') && (v == null || v.length < 10)) return "رقم هاتف غير صحيح";
+        if (label.contains('الهاتف') && _normalizePhone(v ?? '') == null) return "رقم هاتف مصري غير صحيح";
         return null;
       },
     );

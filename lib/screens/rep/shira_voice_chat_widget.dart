@@ -28,11 +28,17 @@ class ChatMessage {
 class ShiraVoiceChatWidget extends StatefulWidget {
   final String cloudFunctionUrl;
   final String userRole; // e.g. 'sales_representative', 'company_agent'
+  // Optional one-shot rep GPS for nearby-customer context. Sent only when
+  // the caller supplies it; never tracked continuously by this widget.
+  final double? repLat;
+  final double? repLng;
 
   const ShiraVoiceChatWidget({
     super.key,
     required this.cloudFunctionUrl,
     required this.userRole,
+    this.repLat,
+    this.repLng,
   });
 
   @override
@@ -181,6 +187,11 @@ final uid = currentUser.uid;
 
       request.fields['uid'] = uid;
       request.fields['role'] = widget.userRole;
+      // One-shot rep location for nearby customers (omitted when absent).
+      if (widget.repLat != null && widget.repLng != null) {
+        request.fields['lat'] = widget.repLat.toString();
+        request.fields['lng'] = widget.repLng.toString();
+      }
       request.fields['isAudio'] = (audioFile != null).toString();
 
       if (text.isNotEmpty) {

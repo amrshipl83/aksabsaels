@@ -210,7 +210,19 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
   }
 
   // --- فتح نافذة شات شيرا الصوتي المساعد ---
-  void _openShiraVoiceAssistant() {
+  Future<void> _openShiraVoiceAssistant() async {
+    // One-shot GPS for nearby-customer context (omitted silently on failure;
+    // no continuous tracking, no extra permission prompt beyond the granted one).
+    double? lat;
+    double? lng;
+    try {
+      Position? pos = await Geolocator.getLastKnownPosition();
+      pos ??= await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+      ).timeout(const Duration(seconds: 8));
+      lat = pos.latitude;
+      lng = pos.longitude;
+    } catch (_) {}
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -221,6 +233,8 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
           child: ShiraVoiceChatWidget(
             cloudFunctionUrl: 'https://shirachat-tmfag3rhdq-uc.a.run.app',
             userRole: repData?['role'] ?? 'sales_representative',
+            repLat: lat,
+            repLng: lng,
           ),
         );
       },
