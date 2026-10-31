@@ -32,6 +32,10 @@ class ShiraVoiceChatWidget extends StatefulWidget {
   // the caller supplies it; never tracked continuously by this widget.
   final double? repLat;
   final double? repLng;
+  // Optional pre-fetched messages (e.g. a start-of-day briefing requested
+  // through the same backend path). Displayed as-is; the live conversation
+  // mechanism below is unchanged.
+  final List<ChatMessage> initialMessages;
 
   const ShiraVoiceChatWidget({
     super.key,
@@ -39,6 +43,7 @@ class ShiraVoiceChatWidget extends StatefulWidget {
     required this.userRole,
     this.repLat,
     this.repLng,
+    this.initialMessages = const [],
   });
 
   @override
@@ -63,6 +68,7 @@ class _ShiraVoiceChatWidgetState extends State<ShiraVoiceChatWidget> {
     super.initState();
     _audioRecorder = AudioRecorder();
     _audioPlayer = AudioPlayer();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _appendInitialMessages());
 
     _audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) {
@@ -77,6 +83,16 @@ class _ShiraVoiceChatWidgetState extends State<ShiraVoiceChatWidget> {
       text: "أهلاً بك يا بطل! أنا شيرا، مساعدك الذكي لإدارة العهدة، تتبع الشحنات، واستعراض نقاط الأمان. كيف أستطيع مساعدتك اليوم؟",
       isUser: false,
     ));
+  }
+
+  // Pre-fetched messages (e.g. a start-of-day briefing obtained through the
+  // same backend path before the sheet opened). Displayed as-is; the live
+  // conversation mechanism is unchanged.
+  void _appendInitialMessages() {
+    if (widget.initialMessages.isNotEmpty) {
+      _messages.addAll(widget.initialMessages);
+      _scrollToBottom();
+    }
   }
 
   @override

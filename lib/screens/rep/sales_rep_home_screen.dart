@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 /* permission_handler removed: location handled via geolocator only */
 import 'package:url_launcher/url_launcher.dart'; 
 import 'dart:convert';
@@ -26,6 +27,42 @@ const Color kSuccessColor = Color(0xFF2E7D32);
 const Color kErrorColor = Color(0xFFC62828);
 const Color kBgColor = Color(0xFFF8F9FA);
 
+// Pure helper (unit-testable): builds the start-of-day briefing request text
+// from data the rep is already allowed to see (own profile, own customers,
+// workday-start fix). No other rep or company data is included.
+String buildStartDayBriefingPrompt({
+  required String repName,
+  required String repCode,
+  required int totalCustomers,
+  required int nearbyCustomers,
+  required List<String> nearbyNames,
+  required bool hasLocation,
+}) {
+  final shown = nearbyNames.where((e) => e.isNotEmpty).take(10).join('، ');
+  final areaLine = hasLocation
+      ? 'موقع بداية اليوم مسجل، وعدد العملاء القريبين منك (نطاق 500 متر): $nearbyCustomers.'
+      : 'تعذر تحديد موقع بداية اليوم، اعتمد على إجمالي العملاء فقط.';
+  return 'افتح يوم عمل جديد للمندوب $repName (كود: $repCode). '
+      'إجمالي عملائه: $totalCustomers. $areaLine'
+      '${shown.isNotEmpty ? ' من الأقربين: $shown.' : ''}'
+      ' جهز تحليلًا عامًا لبداية اليوم واقتراحات عملية مرتبة بالأولوية: '
+      'من يزور أولًا، وأي مناطق يركز عليها، وتذكيرات ميدانية قصيرة.';
+}
+
+// One queued briefing request (latest wins): a day opened while another
+// briefing is still in flight is served right after, never dropped.
+class _QueuedBriefing {
+  final Position fix;
+  final String? logId;
+  _QueuedBriefing(this.fix, this.logId);
+}
+
+// Pure restore gate (unit-testable): a stored briefing is shown only when it
+// belongs to the currently open day.
+bool shouldRestoreBriefing({required String? storedLogId, required String? currentLogId}) {
+  return storedLogId != null && storedLogId.isNotEmpty && storedLogId == currentLogId;
+}
+
 class SalesRepHomeScreen extends StatefulWidget {
   const SalesRepHomeScreen({super.key});
 
@@ -40,6 +77,20 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
   bool _isLoading = true;
   String _statusMessage = 'جاري التحقق...';
   bool _isDayOpen = false;
+  // Start-of-day Shira briefing state. The briefing is requested through the
+  // same Shira backend path when the rep opens a workday; its reply is kept
+  // here until the rep opens the Shira sheet. The FAB frame highlights while
+  // unseen suggestions exist. Never holds another rep's data.
+  bool _hasNewShiraSuggestions = false;
+  List<ChatMessage> _pendingShiraBriefing = [];
+  bool _isBriefingLoading = false;
+  Position? _lastStartFix;
+  // Guards for the finding in review: re-entrant day transitions, stale
+  // briefing overwrite, silent briefing loss, and restart loss.
+  bool _isDayTransitioning = false;
+  String? _briefingRequestedForLogId;
+  Position? _lastBriefingFix;
+  _QueuedBriefing? _queuedBriefing;
   final db = FirebaseFirestore.instance;
 
   @override
@@ -146,6 +197,8 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
           _isDayOpen = true;
           _statusMessage = 'يوم العمل مفتوح حالياً';
         });
+        await _restorePendingBriefing();
+        await _maybeResumeBriefing();
       } else {
         setState(() {
           _isDayOpen = false;
@@ -159,12 +212,41 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     }
   }
 
+  // Workday button entry point. Opening a day additionally requests a
+  // start-of-day briefing through the same Shira backend path; the reply is
+  // kept as pending chat messages and the Shira frame highlights.
+  // Serialized entry point: concurrent taps during permission/GPS gaps
+  // collapse into one transition (no duplicate day docs, no duplicate
+  // briefings). The briefing is bound to the opened day log id.
+  Future<void> _onWorkdayButton() async {
+    if (_isDayTransitioning) return;
+    _isDayTransitioning = true;
+    try {
+      if (_isDayOpen) {
+        await _endDay();
+      } else {
+        _lastStartFix = null;
+        await _startDay();
+        final fix = _lastStartFix;
+        _lastStartFix = null;
+        final logId = currentDayLogId;
+        if (fix != null && mounted && _isDayOpen && logId != null && _briefingRequestedForLogId != logId) {
+          _briefingRequestedForLogId = logId;
+          _requestStartDayBriefing(fix, logId);
+        }
+      }
+    } finally {
+      _isDayTransitioning = false;
+    }
+  }
+
   Future<void> _startDay() async {
     bool hasPermission = await _handleLocationPermission();
     if (!hasPermission) return;
     setState(() => _isLoading = true);
     try {
       Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      _lastStartFix = position;
       await db.collection("daily_logs").add({
         'repCode': repData!['repCode'],
         'repName': repData!['fullname'],
@@ -210,6 +292,218 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
   }
 
   // --- فتح نافذة شات شيرا الصوتي المساعد ---
+  // Requests a start-of-day briefing through the SAME Shira backend path the
+  // chat widget uses (multipart POST with idToken/uid/role/lat/lng/message to
+  // the same Cloud Run URL; same Nova reply + audio handling server-side).
+  // Only data the rep may already see is used: own profile, own customers
+  // (repCode-scoped query), and the workday-start fix captured in _startDay
+  // (never another rep's data, never the visit fix). Fire-and-forget:
+  // failures only debug-log and never block the workday.
+  // Requests a start-of-day briefing through the SAME Shira backend path the
+  // chat widget uses (multipart POST with idToken/uid/role/lat/lng/message to
+  // the same Cloud Run URL; same Nova reply + audio handling server-side).
+  // Only data the rep may already see is used: own profile, own customers
+  // (repCode-scoped query), and the workday-start fix (never another rep's
+  // data, never the visit fix). Fire-and-forget: failures debug-log and offer
+  // an in-session retry; the workday itself is never blocked.
+  Future<void> _requestStartDayBriefing(Position fix, String? logId) async {
+    // Single-flight with latest-wins queue: a day opened while another
+    // briefing is in flight is served right after, never silently dropped.
+    if (_isBriefingLoading) {
+      _queuedBriefing = _QueuedBriefing(fix, logId);
+      return;
+    }
+    setState(() => _isBriefingLoading = true);
+    _briefingRequestedForLogId = logId;
+    _lastBriefingFix = fix;
+    try {
+      final repCode = repData?['repCode']?.toString() ?? '';
+      final repName = repData?['fullname']?.toString() ?? 'المندوب';
+      if (repCode.isEmpty) return;
+      final snap = await db
+          .collection('users')
+          .where('repCode', isEqualTo: repCode)
+          .where('role', isEqualTo: 'buyer')
+          .get();
+      final docs = snap.docs;
+      final List<String> nearbyNames = [];
+      int nearby = 0;
+      for (final d in docs) {
+        try {
+          final loc = (d.data())['location'] as Map?;
+          if (loc == null) continue;
+          final double? la = (loc['lat'] as num?)?.toDouble();
+          final double? ln = (loc['lng'] as num?)?.toDouble();
+          if (la == null || ln == null) continue;
+          final dist = Geolocator.distanceBetween(fix.latitude, fix.longitude, la, ln);
+          if (dist <= 500) {
+            nearby++;
+            if (nearbyNames.length < 10) {
+              nearbyNames.add((d.data())['fullname']?.toString() ?? '');
+            }
+          }
+        } catch (_) {}
+      }
+      final prompt = buildStartDayBriefingPrompt(
+        repName: repName,
+        repCode: repCode,
+        totalCustomers: docs.length,
+        nearbyCustomers: nearby,
+        nearbyNames: nearbyNames,
+        hasLocation: true,
+      );
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final idToken = await user.getIdToken();
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('https://shirachat-tmfag3rhdq-uc.a.run.app'),
+      );
+      request.headers['Authorization'] = 'Bearer $idToken';
+      request.fields['uid'] = user.uid;
+      request.fields['role'] = repData?['role']?.toString() ?? 'sales_representative';
+      request.fields['lat'] = fix.latitude.toString();
+      request.fields['lng'] = fix.longitude.toString();
+      request.fields['isAudio'] = 'false';
+      request.fields['message'] = prompt;
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode != 200) {
+        _briefingRequestedForLogId = null;
+        _offerBriefingRetry(logId);
+        return;
+      }
+      final data = jsonDecode(response.body);
+      final reply = (data['reply'] ?? data['message'] ?? '').toString();
+      if (reply.isEmpty) {
+        _briefingRequestedForLogId = null;
+        _offerBriefingRetry(logId);
+        return;
+      }
+      final audioUrl = data['audioUrl'] ?? data['audio_url'];
+      if (!mounted) return;
+      // Stale guard: a briefing that arrives after its day closed (or after a
+      // newer day opened) is dropped instead of overwriting current state.
+      if (currentDayLogId != logId || !_isDayOpen) return;
+      setState(() {
+        _pendingShiraBriefing = [
+          ChatMessage(text: 'طلب تحليل بداية اليوم', isUser: true),
+          ChatMessage(text: reply, isUser: false, audioUrl: audioUrl?.toString()),
+        ];
+        _hasNewShiraSuggestions = true;
+      });
+      await _storePendingBriefing(logId);
+    } catch (e) {
+      debugPrint('Start-day briefing skipped: $e');
+      _briefingRequestedForLogId = null;
+      _offerBriefingRetry(logId);
+    } finally {
+      if (mounted) setState(() => _isBriefingLoading = false);
+      final queued = _queuedBriefing;
+      _queuedBriefing = null;
+      if (queued != null && mounted) {
+        _requestStartDayBriefing(queued.fix, queued.logId);
+      }
+    }
+  }
+
+  // Informs the rep (same open day only) when the briefing could not be
+  // fetched, with a one-tap retry. Never fires for a stale/closed day.
+  void _offerBriefingRetry(String? logId) {
+    if (!mounted || logId == null || currentDayLogId != logId || !_isDayOpen) return;
+    if (_lastBriefingFix == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('تعذر جلب اقتراحات بداية اليوم — يمكنك المحاولة أو سؤال شيرا مباشرة'),
+        action: SnackBarAction(
+          label: 'إعادة المحاولة',
+          onPressed: () {
+            final fix = _lastBriefingFix;
+            if (fix != null) _requestStartDayBriefing(fix, logId);
+          },
+        ),
+      ),
+    );
+  }
+
+  static const String _briefingPrefsKey = 'pending_briefing_v1';
+
+  Future<void> _storePendingBriefing(String? logId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final items = _pendingShiraBriefing
+          .map((m) => {'text': m.text, 'isUser': m.isUser, 'audioUrl': m.audioUrl})
+          .toList();
+      await prefs.setString(_briefingPrefsKey, jsonEncode({'logId': logId, 'items': items}));
+    } catch (e) {
+      debugPrint('Briefing persist skipped: $e');
+    }
+  }
+
+  // Restart recovery, part 1: an arrived-but-unseen briefing is restored only
+  // when it belongs to the currently open day (see shouldRestoreBriefing).
+  Future<void> _restorePendingBriefing() async {
+    try {
+      if (_pendingShiraBriefing.isNotEmpty || _hasNewShiraSuggestions) return;
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_briefingPrefsKey);
+      if (raw == null) return;
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      if (!shouldRestoreBriefing(
+        storedLogId: data['logId']?.toString(),
+        currentLogId: currentDayLogId,
+      )) {
+        return;
+      }
+      final items = (data['items'] as List?) ?? [];
+      final restored = items
+          .whereType<Map<String, dynamic>>()
+          .map((m) => ChatMessage(
+                text: (m['text'] ?? '').toString(),
+                isUser: m['isUser'] == true,
+                audioUrl: m['audioUrl']?.toString(),
+              ))
+          .where((m) => m.text.isNotEmpty)
+          .toList();
+      if (restored.isEmpty || !mounted) return;
+      setState(() {
+        _pendingShiraBriefing = restored;
+        _hasNewShiraSuggestions = true;
+      });
+    } catch (e) {
+      debugPrint('Briefing restore skipped: $e');
+    }
+  }
+
+  Future<void> _clearStoredBriefing() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_briefingPrefsKey);
+    } catch (e) {
+      debugPrint('Briefing clear skipped: $e');
+    }
+  }
+
+  // Restart recovery, part 2: an open day with no briefing, no stored copy,
+  // and no request yet this session gets one request (same path, one-shot
+  // fix). Skipped while a fresh start is already driving its own request.
+  Future<void> _maybeResumeBriefing() async {
+    if (_pendingShiraBriefing.isNotEmpty) return;
+    if (_briefingRequestedForLogId == currentDayLogId) return;
+    if (_lastStartFix != null) return;
+    if (!mounted || !_isDayOpen || currentDayLogId == null) return;
+    final logId = currentDayLogId;
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+      ).timeout(const Duration(seconds: 8));
+      if (!mounted || !_isDayOpen || currentDayLogId != logId) return;
+      _requestStartDayBriefing(pos, logId);
+    } catch (_) {
+      // No standing request recorded: a later refresh may retry.
+    }
+  }
+
   Future<void> _openShiraVoiceAssistant() async {
     // One-shot GPS for nearby-customer context (omitted silently on failure;
     // no continuous tracking, no extra permission prompt beyond the granted one).
@@ -223,7 +517,15 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
       lat = pos.latitude;
       lng = pos.longitude;
     } catch (_) {}
-    showModalBottomSheet(
+    final pendingBriefing = _pendingShiraBriefing;
+    if (mounted) {
+      setState(() {
+        _pendingShiraBriefing = [];
+        _hasNewShiraSuggestions = false;
+      });
+      await _clearStoredBriefing();
+    }
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -235,6 +537,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
             userRole: repData?['role'] ?? 'sales_representative',
             repLat: lat,
             repLng: lng,
+            initialMessages: pendingBriefing,
           ),
         );
       },
@@ -311,7 +614,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                     offset: const Offset(0, 4),
                   ),
                 ],
-                border: Border.all(color: Colors.white, width: 2),
+                border: Border.all(color: _hasNewShiraSuggestions ? const Color(0xFFFFA000) : Colors.white, width: _hasNewShiraSuggestions ? 3 : 2),
               ),
               child: Stack(
                 alignment: Alignment.center,
@@ -338,6 +641,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                         color: const Color(0xFF2E7D32),
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 2),
+
                       ),
                     ),
                   ),
@@ -366,7 +670,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
-        onPressed: _isLoading ? null : (_isDayOpen ? _endDay : _startDay),
+        onPressed: _isLoading ? null : _onWorkdayButton,
         icon: Icon(_isDayOpen ? Icons.stop_rounded : Icons.play_arrow_rounded, size: 28),
         label: Text(_isDayOpen ? "إنهاء وردية العمل" : "بدء يوم عمل جديد", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         style: ElevatedButton.styleFrom(
