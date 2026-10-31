@@ -90,7 +90,11 @@ class _ShiraVoiceChatWidgetState extends State<ShiraVoiceChatWidget> {
   // conversation mechanism is unchanged.
   void _appendInitialMessages() {
     if (widget.initialMessages.isNotEmpty) {
-      _messages.addAll(widget.initialMessages);
+      if (mounted) {
+        setState(() {
+          _messages.addAll(widget.initialMessages);
+        });
+      }
       _scrollToBottom();
     }
   }

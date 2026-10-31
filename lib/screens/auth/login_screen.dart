@@ -7,10 +7,12 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'dart:convert';
 import 'register_screen.dart';
 import 'package:aksab_sales/services/session_service.dart';
+import 'package:aksab_sales/services/akedly_login_service.dart';
+import 'package:aksab_sales/services/sales_rep_review_access.dart';
 
 // --- الهوية البصرية الجديدة لأكسب ---
 const Color kPrimaryColor = Color(0xFFB21F2D); // أحمر أكسب المعتمد
-const Color kSecondaryColor = Color(0xFF1A2C3D); 
+const Color kSecondaryColor = Color(0xFF1A2C3D);
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -22,7 +24,10 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final AkedlyLoginService _loginService = AkedlyLoginService();
+
+  // Last OTP send time for the 60s resend cooldown.
+  DateTime? _lastOtpSentAt;
 
   String? _errorMessage;
   bool _isLoading = true;
@@ -36,7 +41,6 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _phoneController.dispose();
-    _passwordController.dispose();
     super.dispose();
   }
 
@@ -94,86 +98,241 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // دخول OTP للحسابات المعتمدة فقط. لا يوجد مسار بريد/باسورد: الهويات
+  // المنشأة عبر التسجيل بلا كلمة مرور مضبوطة، والخادم هو من يقرر
+  // (404 غير مسجل، 403 معلّق) وليس الواجهة.
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
+    final phone = _phoneController.text.trim();
+
+    // أرقام مراجعة Google Play: تجاوز /send بالكامل (لا SMS ولا
+    // transaction ولا cooldown إرسال)، ثم حوار OTP المعتاد كما هو.
+    if (SalesRepReviewAccess.isReviewNumber(phone)) {
+      final normalized = SalesRepReviewAccess.normalize(phone) ?? phone;
+      if (mounted) setState(() => _isLoading = false);
+      final code = await _promptOtpDialog(normalized);
+      if (code == null || code.isEmpty) return;
+      await _reviewSignIn(normalized, code);
+      return;
+    }
+
+    // Cooldown 60s: يمنع تكلفة SMS المتكررة وحظر 429.
+    final remaining = AkedlyLoginService.resendCooldownRemaining(
+        _lastOtpSentAt, DateTime.now());
+    if (remaining > 0) {
+      _showError(
+          'تم إرسال كود التحقق. يرجى الانتظار $remaining ثانية قبل طلب كود جديد.');
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    String input = _phoneController.text.trim();
-    // ✅ النطاق الذكي الحصري لفريق المبيعات والإدارة
-    String smartEmail = input.contains('@') ? input : "$input@aksabsales.com";
-    final password = _passwordController.text.trim();
-
     try {
-      // الدخول المباشر بالرقم والباسورد يدوياً بدون تفعيل تلقائي
-      final userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: smartEmail,
-        password: password,
+      // Step 1: الخادم يتحقق من التسجيل والحالة قبل إنفاق أي SMS.
+      final txID = await _loginService.loginSend(phone);
+      _lastOtpSentAt = DateTime.now();
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      final code = await _promptOtpDialog(phone);
+      if (code == null || code.isEmpty) return;
+      await _verifyOtpCode(txID, code);
+    } on LoginException catch (e) {
+      _showError(e.message.isNotEmpty
+          ? e.message
+          : AkedlyLoginService.loginErrorMessage(e.statusCode));
+    } catch (_) {
+      _showError('⚠️ تعذّر إتمام العملية حاليًا. حاول لاحقًا.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<String?> _promptOtpDialog(String phone) {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('تأكيد الهوية',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'Cairo')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('أدخل الكود المرسل للرقم\n$phone',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontFamily: 'Cairo')),
+              const SizedBox(height: 20),
+              TextField(
+                controller: ctrl,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                maxLength: 6,
+                style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 10),
+                decoration: const InputDecoration(
+                  counterText: '',
+                  hintText: '000000',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            Center(
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kPrimaryColor,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 40, vertical: 12),
+                ),
+                onPressed: () {
+                  final code = ctrl.text.trim();
+                  if (AkedlyLoginService.isValidOtp(code)) {
+                    Navigator.of(ctx).pop(code);
+                  }
+                },
+                child: const Text('دخول للنظام',
+                    style: TextStyle(color: Colors.white, fontFamily: 'Cairo')),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // دخول حسابات مراجعة Google Play: الكود الثابت فقط (123456 كاملًا
+  // وبالترتيب)، ثم دخول Firebase Auth حقيقي بالهوية المُجهزة مسبقًا —
+  // لا جلسة محلية وهمية ولا Anonymous Auth. لا تُستدعى هذه الدالة إلا
+  // بعد مطابقة الرقم لقائمة المراجعة، فالكود غير صالح لأي رقم آخر.
+  Future<void> _reviewSignIn(String normalizedPhone, String code) async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    try {
+      if (!SalesRepReviewAccess.isValidReviewCode(code)) {
+        _showError('❌ كود التحقق غير صحيح.');
+        return;
+      }
+      final credential =
+          await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: SalesRepReviewAccess.reviewEmail(normalizedPhone),
+        password: SalesRepReviewAccess.reviewPassword(normalizedPhone),
       );
+      // الدور والصلاحيات من Firestore عبر UID الحقيقي، بنفس منطق الدخول العادي.
+      await _completeSignIn(credential.user);
+    } on FirebaseAuthException {
+      await FirebaseAuth.instance.signOut();
+      _showError('❌ تعذّر دخول حساب المراجعة. تأكد من تجهيزه في Firebase Console.');
+    } catch (e) {
+      _showError('❌ خطأ في النظام: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
-      final user = userCredential.user;
-      if (user == null) throw FirebaseAuthException(code: 'user-null');
+  /// إكمال الجلسة المشترك لكلا مساري الدخول (أكدلي والمراجعة):
+  /// البحث عن مستند المستخدم في salesRep ثم managers عبر UID الحقيقي،
+  /// واشتراط approved، وحفظ الجلسة، والتوجيه حسب الدور.
+  /// الحساب المعلق يُطرد، والمجهول يُطرد — بنفس القواعد للجميع.
+  Future<void> _completeSignIn(User? user) async {
+    if (user == null) throw FirebaseAuthException(code: 'user-null');
 
-      DocumentSnapshot? userDocSnapshot;
-      String? userRole;
-      String? matchedCollection;
+    DocumentSnapshot? userDocSnapshot;
+    String? userRole;
+    String? matchedCollection;
 
-      // ✅ البحث في كولكشن salesRep (المفرد) بناءً على قواعد الـ Firestore الثابتة
-      final salesRepQuery = await FirebaseFirestore.instance
-          .collection('salesRep') 
+    // ✅ البحث في كولكشن salesRep (المفرد) بناءً على قواعد الـ Firestore الثابتة
+    final salesRepQuery = await FirebaseFirestore.instance
+        .collection('salesRep')
+        .where('uid', isEqualTo: user.uid)
+        .limit(1)
+        .get();
+
+    if (salesRepQuery.docs.isNotEmpty) {
+      userDocSnapshot = salesRepQuery.docs.first;
+      userRole = 'sales_rep';
+      matchedCollection = 'salesRep';
+    }
+
+    if (userDocSnapshot == null) {
+      final managersQuery = await FirebaseFirestore.instance
+          .collection('managers')
           .where('uid', isEqualTo: user.uid)
           .limit(1)
           .get();
-
-      if (salesRepQuery.docs.isNotEmpty) {
-        userDocSnapshot = salesRepQuery.docs.first;
-        userRole = 'sales_rep';
-        matchedCollection = 'salesRep';
+      if (managersQuery.docs.isNotEmpty) {
+        userDocSnapshot = managersQuery.docs.first;
+        userRole = userDocSnapshot.get('role')?.toString();
+        matchedCollection = 'managers';
       }
+    }
 
-      if (userDocSnapshot == null) {
-        final managersQuery = await FirebaseFirestore.instance
-            .collection('managers')
-            .where('uid', isEqualTo: user.uid)
-            .limit(1)
-            .get();
-        if (managersQuery.docs.isNotEmpty) {
-          userDocSnapshot = managersQuery.docs.first;
-          userRole = userDocSnapshot.get('role')?.toString();
-          matchedCollection = 'managers';
-        }
-      }
+    if (userDocSnapshot != null &&
+        userRole != null &&
+        matchedCollection != null) {
+      final userDocData = userDocSnapshot.data() as Map<String, dynamic>;
+      userDocData['docId'] = userDocSnapshot.id;
 
-      if (userDocSnapshot != null && userRole != null && matchedCollection != null) {
-        final userDocData = userDocSnapshot.data() as Map<String, dynamic>;
-        userDocData['docId'] = userDocSnapshot.id;
+      if (userDocData['status'] == 'approved') {
+        // ✅ مناداة تحديث الإشعارات مباشرة في الفايرستور بدلاً من دالة أمازون المحذوفة
+        await _updateFcmTokenInFirestore(userDocSnapshot.id, matchedCollection);
 
-        if (userDocData['status'] == 'approved') {
-          // ✅ مناداة تحديث الإشعارات مباشرة في الفايرستور بدلاً من دالة أمازون المحذوفة
-          await _updateFcmTokenInFirestore(userDocSnapshot.id, matchedCollection);
+        final prefs = await SharedPreferences.getInstance();
+        // ✅ التخزين باستخدام الـ encoder لضمان عدم حدوث خطأ في الـ Timestamps
+        await prefs.setString(
+            'userData', json.encode(userDocData, toEncodable: _encoder));
+        await prefs.setString('userRole', userRole);
 
-          final prefs = await SharedPreferences.getInstance();
-          // ✅ التخزين باستخدام الـ encoder لضمان عدم حدوث خطأ في الـ Timestamps
-          await prefs.setString('userData', json.encode(userDocData, toEncodable: _encoder));
-          await prefs.setString('userRole', userRole);
-
-          if (mounted) {
-            Navigator.of(context).pushReplacementNamed(
-              userRole == 'sales_rep' ? '/rep_home' : '/admin_dashboard'
-            );
-          }
-        } else {
-          await FirebaseAuth.instance.signOut();
-          _showError('❌ حسابك بانتظار تفعيل الإدارة.');
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed(
+              userRole == 'sales_rep' ? '/rep_home' : '/admin_dashboard');
         }
       } else {
         await FirebaseAuth.instance.signOut();
-        _showError('❌ بياناتك غير موجودة في سجلات مبيعات أكسب.');
+        _showError('❌ حسابك بانتظار تفعيل الإدارة.');
       }
+    } else {
+      await FirebaseAuth.instance.signOut();
+      _showError('❌ بياناتك غير موجودة في سجلات مبيعات أكسب.');
+    }
+  }
+
+  Future<void> _verifyOtpCode(String txID, String code) async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    try {
+      // لا يُستدعى /verify هنا أبدًا: العملية أحادية الاستخدام، وتحقق مسبق
+      // يحرقها فيفشل /mint بـ410 على كود صحيح.
+      final token = await _loginService.loginMint(
+          transactionReqID: txID, otp: code);
+      final userCredential =
+          await FirebaseAuth.instance.signInWithCustomToken(token);
+
+      // الدور والجلسة من Firestore عبر UID الحقيقي — نفس المنطق لكلا المسارين.
+      await _completeSignIn(userCredential.user);
+    } on LoginException catch (e) {
+      // العملية المحترقة (410) لا تصلح لإعادة المحاولة: يلزم كود جديد
+      // (المستخدم يطلب كودًا جديدًا بزر الدخول بعد انتهاء الـ cooldown).
+      _showError(e.message.isNotEmpty
+          ? e.message
+          : AkedlyLoginService.loginErrorMessage(e.statusCode));
     } on FirebaseAuthException {
-      _showError('❌ رقم الهاتف أو كلمة المرور غير صحيحة.');
+      await FirebaseAuth.instance.signOut();
+      _showError('❌ تعذّر إتمام الدخول. حاول لاحقًا.');
     } catch (e) {
       _showError('❌ خطأ في النظام: ${e.toString()}');
     } finally {
@@ -217,14 +376,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     const Icon(Icons.stars_rounded, size: 70, color: kPrimaryColor),
                     const SizedBox(height: 10),
-                    const Text('أكسب للمبيعات', 
+                    const Text('أكسب للمبيعات',
                         style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: kSecondaryColor, fontFamily: 'Cairo')),
-                    const Text('منظومة المندوب الذكي', 
+                    const Text('منظومة المندوب الذكي',
                         style: TextStyle(fontSize: 14, color: Colors.grey, fontFamily: 'Cairo')),
                     const SizedBox(height: 30),
                     _buildField(_phoneController, 'رقم الهاتف', Icons.phone_android, isPhone: true),
-                    const SizedBox(height: 20),
-                    _buildField(_passwordController, 'كلمة المرور', Icons.lock_outline, isPass: true),
                     const SizedBox(height: 30),
                     SizedBox(
                       width: double.infinity,
@@ -237,7 +394,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         child: _isLoading
                             ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text('دخول للفريق', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold, fontFamily: 'Cairo')),
+                            : const Text('إرسال كود الدخول', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold, fontFamily: 'Cairo')),
                       ),
                     ),
                     if (_errorMessage != null)

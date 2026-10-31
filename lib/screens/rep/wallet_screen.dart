@@ -21,6 +21,8 @@ class _WalletScreenState extends State<WalletScreen> {
   bool _isLoading = false;
   String? _repDocId;
   bool _resolvingDoc = true;
+  // Idempotency key for the in-flight withdraw attempt (cleared on success).
+  String? _activeWithdrawReqId;
 
   @override
   void initState() {
@@ -276,8 +278,29 @@ class _WalletScreenState extends State<WalletScreen> {
         }
         return;
       }
+      // Idempotency: one doc id per logical attempt, reused across retries
+      // (double-tap is already gated by _isLoading; this covers retry after
+      // a disconnect where the first attempt may have committed).
+      _activeWithdrawReqId ??= FirebaseFirestore.instance.collection('withdrawRequests').doc().id;
+      final reqRef = FirebaseFirestore.instance.collection('withdrawRequests').doc(_activeWithdrawReqId!);
+      try {
+        final existing = await reqRef.get();
+        if (existing.exists) {
+          if (mounted) Navigator.pop(context);
+          _amountController.clear();
+          _accountController.clear();
+          _activeWithdrawReqId = null;
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                backgroundColor: Colors.green, content: Text("تم إرسال طلب السحب بالفعل!")));
+          }
+          return;
+        }
+      } catch (_) {
+        // Read failed: fall through to the transaction, the server guard
+        // remains the authoritative duplicate backstop.
+      }
       final repRef = FirebaseFirestore.instance.collection('salesRep').doc(_repDocId);
-      final reqRef = FirebaseFirestore.instance.collection('withdrawRequests').doc();
       await FirebaseFirestore.instance.runTransaction((tx) async {
         final snap = await tx.get(repRef);
         if (!snap.exists) throw Exception('missing-wallet');
@@ -309,6 +332,7 @@ class _WalletScreenState extends State<WalletScreen> {
       if (mounted) Navigator.pop(context);
       _amountController.clear();
       _accountController.clear();
+      _activeWithdrawReqId = null;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(backgroundColor: Colors.green, content: Text("تم إرسال طلب السحب بنجاح!")));
       }
