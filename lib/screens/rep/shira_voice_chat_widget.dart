@@ -5,7 +5,8 @@ import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
-/* shared_preferences import removed: unused in this widget */
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:aksab_sales/services/shira_mic_consent.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 const Color kPrimaryColor = Color(0xFF43B97F);
@@ -129,9 +130,62 @@ class _ShiraVoiceChatWidgetState extends State<ShiraVoiceChatWidget> {
     }
   }
 
+  // رسالة الإفصاح: تُعرض مرة واحدة عند أول استخدام فعلي للتسجيل الصوتي،
+  // وقبل طلب إذن الميكروفون من النظام — وليس عند فتح التطبيق أو تسجيل الدخول.
+  Future<bool?> _showMicDisclosure() {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          title: const Row(
+            children: [
+              Icon(Icons.mic, color: kPrimaryColor),
+              SizedBox(width: 8),
+              Text("استخدام الميكروفون في Shira"),
+            ],
+          ),
+          content: const Text(
+            "تحتاج المحادثة الصوتية إلى الميكروفون لالتقاط صوتك أثناء التسجيل فقط. "
+            "يُرفع التسجيل عبر اتصال آمن لمعالجته والرد عليك، ولا يُستخدم صوتك لأي غرض آخر. "
+            "بالمتابعة أنت توافق على استخدام الميكروفون لهذا الغرض.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("ليس الآن", style: TextStyle(color: Colors.grey)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("موافق، استمر",
+                  style: TextStyle(color: kPrimaryColor, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // بدء التسجيل الصوتي
   Future<void> _startRecording() async {
     try {
+      // بوابة الإفصاح أولًا: لا يُطلب إذن النظام قبل موافقة المستخدم على الإفصاح.
+      final prefs = await SharedPreferences.getInstance();
+      if (ShiraMicConsent.shouldShowDisclosure(prefs.getBool(ShiraMicConsent.prefsKey))) {
+        final accepted = await _showMicDisclosure() ?? false;
+        if (!accepted) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("تم رفض الميكروفون — لن تعمل المحادثة الصوتية بدونه، وباقي التطبيق يعمل عادي."),
+            ),
+          );
+          return;
+        }
+        await prefs.setBool(ShiraMicConsent.prefsKey, true);
+      }
       if (await _audioRecorder.hasPermission()) {
         final Directory appFolder = await getApplicationDocumentsDirectory();
         final String filePath = '${appFolder.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';

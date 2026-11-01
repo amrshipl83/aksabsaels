@@ -32,7 +32,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // دالة لفتح رابط الخصوصية
   Future<void> _launchUrl() async {
-    final Uri url = Uri.parse('https://aksab.shop/'); // يفضل وضع الرابط الكامل للسياسة
+    final Uri url = Uri.parse('https://aksabtech.com/privacy.html');
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
       throw Exception('Could not launch $url');
     }
