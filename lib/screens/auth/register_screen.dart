@@ -38,35 +38,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  Future<String?> _promptOtpDialog() {
-    final ctrl = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('كود التفعيل', style: TextStyle(fontFamily: 'Cairo'), textAlign: TextAlign.center),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.number,
-          maxLength: 10,
-          textAlign: TextAlign.center,
-          decoration: const InputDecoration(hintText: 'أدخل الكود المرسل لهاتفك'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('إلغاء', style: TextStyle(fontFamily: 'Cairo')),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
-            style: ElevatedButton.styleFrom(backgroundColor: aksabRed),
-            child: const Text('تأكيد', style: TextStyle(fontFamily: 'Cairo')),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -75,40 +46,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _message = null;
     });
 
-    String phone = _phoneController.text.trim();
-
-    setState(() {
-      _isLoading = true;
-      _message = null;
-    });
+    final phone = _phoneController.text.trim();
 
     try {
-      // F3: step 1 - backend OTP-proves the unknown phone, binds role server-side.
-      final send = await _regService.registerSend(phone, _selectedRole);
-      if (!send.isSuccess) {
-        setState(() {
-          _isSuccess = false;
-          _message = send.message ?? '❌ تعذّر بدء التسجيل.';
-        });
-        return;
-      }
-      final txID = send.data ?? '';
-      if (txID.isEmpty) {
-        setState(() {
-          _isSuccess = false;
-          _message = '❌ تعذّر بدء التسجيل.';
-        });
-        return;
-      }
-
-      final otp = await _promptOtpDialog();
-      if (otp == null || otp.isEmpty) return;
-
-      // F3: step 2 - server creates the passwordless identity in the bound queue.
-      await _regService.registerVerify(
-        transactionReqID: txID,
-        otp: otp,
+      // New flow, phase 1: create a pending request only - the server sends
+      // no OTP before admin approval. The OTP arrives at first login after
+      // the administration approves the request.
+      await _regService.registerRequest(
         phoneNumber: phone,
+        role: _selectedRole,
         profile: {
           'fullname': _nameController.text.trim(),
           'address': _addressController.text.trim(),
@@ -126,11 +72,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     } on RegisterException catch (e) {
       setState(() {
         _isSuccess = false;
-        if (e.statusCode == 409) {
-          _message = '❌ رقم الهاتف هذا مسجل بالفعل.';
-        } else {
-          _message = '❌ تعذّر إتمام التسجيل حاليًا.';
-        }
+        _message = AkedlyRegisterService.registerErrorMessage(e.statusCode);
       });
     } catch (e) {
       setState(() {

@@ -41,6 +41,55 @@ class AkedlyRegisterService {
     }
   }
 
+  /// Phase 1 of the new flow — create a pending request, no OTP.
+  /// The server stores a `pending` doc for server-side admin review and
+  /// sends the OTP only after approval, at first login. Returns the
+  /// requestId (canonical 20-form phone). Throws [RegisterException]
+  /// carrying the backend status (400 invalid, 409 already registered,
+  /// 429 limited) for UI mapping.
+  Future<String> registerRequest({
+    required String phoneNumber,
+    required String role,
+    required Map<String, dynamic> profile,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$_baseUrl/register-request'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'phoneNumber': phoneNumber,
+        'role': role,
+        'profile': profile,
+      }),
+    );
+    final resData =
+        response.body.isNotEmpty ? jsonDecode(response.body) : null;
+    if (response.statusCode == 200) {
+      final data = resData is Map ? resData['data'] : null;
+      if (data is Map && data['requestId'] != null) {
+        return data['requestId'].toString();
+      }
+    }
+    String? message;
+    if (resData is Map && resData['message'] != null) {
+      message = resData['message'].toString();
+    }
+    throw RegisterException(response.statusCode, message ?? response.body);
+  }
+
+  /// Maps register-request failures to user-facing Arabic messages. Pure.
+  static String registerErrorMessage(int statusCode) {
+    switch (statusCode) {
+      case 400:
+        return '❌ بيانات التسجيل غير صالحة. راجع الحقول وحاول مجددًا.';
+      case 409:
+        return '❌ رقم الهاتف هذا مسجل بالفعل.';
+      case 429:
+        return '⚠️ محاولات كثيرة. حاول لاحقًا.';
+      default:
+        return '❌ تعذّر إتمام التسجيل حاليًا.';
+    }
+  }
+
   /// Step 2 — server verifies OTP then creates the passwordless identity.
   /// Throws [RegisterException] carrying the backend status
   /// (400/403/404/409/410/429) for UI mapping.
