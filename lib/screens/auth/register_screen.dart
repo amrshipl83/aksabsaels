@@ -1,6 +1,7 @@
 // lib/screens/auth/register_screen.dart
 import 'package:flutter/material.dart';
 import 'package:aksab_sales/services/akedly_register_service.dart';
+import 'package:aksab_sales/utils/phone_normalize.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -46,7 +47,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _message = null;
     });
 
-    final phone = _phoneController.text.trim();
+    final rawPhone = _phoneController.text.trim();
+    final normalized = normalizeEgyptianPhoneToLocal(rawPhone);
+    if (normalized == null) {
+      _isLoading = false;
+      setState(() {
+        _isSuccess = false;
+        _message = 'رقم الهاتف غير صحيح. ادخل رقما مصريا صحيحا (11 رقما يبدا بـ 010/011/012/015).';
+      });
+      return;
+    }
+    final phone = normalized;
 
     try {
       // New flow, phase 1: create a pending request only - the server sends
@@ -72,7 +83,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     } on RegisterException catch (e) {
       setState(() {
         _isSuccess = false;
-        _message = AkedlyRegisterService.registerErrorMessage(e.statusCode);
+        _message = AkedlyRegisterService.resolveRegisterMessage(e.statusCode, e.body);
       });
     } catch (e) {
       setState(() {

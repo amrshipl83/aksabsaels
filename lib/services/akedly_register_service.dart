@@ -81,13 +81,49 @@ class AkedlyRegisterService {
     switch (statusCode) {
       case 400:
         return '❌ بيانات التسجيل غير صالحة. راجع الحقول وحاول مجددًا.';
+      case 403:
+        return '⏳ طلبك قيد المراجعة أو غير مسموح به حاليًا.';
+      case 404:
+        return '❌ خدمة التسجيل غير متاحة حاليًا (404). حدّث التطبيق وحاول مجددًا.';
       case 409:
         return '❌ رقم الهاتف هذا مسجل بالفعل.';
       case 429:
         return '⚠️ محاولات كثيرة. حاول لاحقًا.';
+      case 500:
+      case 502:
+      case 503:
+        return '⚠️ عطل مؤقت في خدمة التسجيل. حاول لاحقًا.';
       default:
-        return '❌ تعذّر إتمام التسجيل حاليًا.';
+        return '❌ تعذّر إتمام التسجيل حاليًا. (كود: $statusCode)';
     }
+  }
+
+  /// Prefers the backend message when it is user-facing, else falls back
+  /// to [registerErrorMessage]. [serverBody] is the RegisterException body
+  /// (already the extracted message when the backend returns JSON).
+  static String resolveRegisterMessage(int statusCode, String serverBody) {
+    final body = serverBody.trim();
+    if (body.isNotEmpty &&
+        body.length < 300 &&
+        !body.startsWith('<') &&
+        body != '{}' &&
+        body != 'null') {
+      // Backend may still return a JSON envelope here (raw body fallback).
+      if (body.startsWith('{')) {
+        try {
+          final decoded = jsonDecode(body);
+          if (decoded is Map && decoded['message'] != null) {
+            final msg = decoded['message'].toString().trim();
+            if (msg.isNotEmpty && msg.length < 300) return msg;
+          }
+        } catch (_) {
+          // Fall through to raw body below.
+        }
+      } else {
+        return body;
+      }
+    }
+    return registerErrorMessage(statusCode);
   }
 
   /// Step 2 — server verifies OTP then creates the passwordless identity.
