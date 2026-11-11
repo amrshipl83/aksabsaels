@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
+import '../../utils/firestore_helpers.dart';
 
 // استيراد الصفحات التابعة
 import 'sales_orders_report_screen.dart';
@@ -108,8 +109,10 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             .collection('salesRep')
             .where('supervisorId', isEqualTo: myDocId)
             .get();
-        repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
-        totalAgents = agentsSnap.size;
+        // Tracking is permanent-only (client-side: legacy docs lack repType).
+        final eligibleAgents = agentsSnap.docs.where((doc) => isTargetEligible(doc['repType'])).toList();
+        repCodes = eligibleAgents.map((doc) => doc['repCode'] as String).toList();
+        totalAgents = eligibleAgents.length;
 
         if (repCodes.isNotEmpty) {
            final customersSnap = await FirebaseFirestore.instance
@@ -131,8 +134,10 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               .collection('salesRep')
               .where('supervisorId', whereIn: supervisorIds)
               .get();
-          repCodes = agentsSnap.docs.map((doc) => doc['repCode'] as String).toList();
-          totalAgents = agentsSnap.size;
+          // Tracking is permanent-only (client-side: legacy docs lack repType).
+          final eligibleAgents = agentsSnap.docs.where((doc) => isTargetEligible(doc['repType'])).toList();
+          repCodes = eligibleAgents.map((doc) => doc['repCode'] as String).toList();
+          totalAgents = eligibleAgents.length;
         }
       }
 

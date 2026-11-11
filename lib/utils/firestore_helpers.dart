@@ -60,3 +60,28 @@ bool canEditTarget({required String? myRole, required String collection}) {
   if (myRole == 'sales_supervisor' && collection == 'salesRep') return true;
   return false;
 }
+
+/// Rep employment classification stored on the approved salesRep doc
+/// (`repType`: 'permanent' | 'freelance'). Written once at approval time.
+const String kRepTypePermanent = 'permanent';
+const String kRepTypeFreelance = 'freelance';
+
+/// Normalizes any stored/missing value. Unknown or missing → permanent
+/// (safe default: never grants wallet access).
+String normalizeRepType(dynamic raw) =>
+    raw?.toString() == kRepTypeFreelance ? kRepTypeFreelance : kRepTypePermanent;
+
+/// Wallet (icon, screen, withdraw ops) is freelance-only. Permanent reps
+/// and legacy docs without a type are denied.
+bool canAccessWallet(dynamic repType) =>
+    normalizeRepType(repType) == kRepTypeFreelance;
+
+/// Goals screen is permanent-only (legacy docs without a type count as
+/// permanent). Freelance reps are excluded from targets tracking.
+bool canViewGoals(dynamic repType) =>
+    normalizeRepType(repType) == kRepTypePermanent;
+
+/// Permanent reps are linked to supervisors and enter target
+/// distribution/tracking; freelance reps never are.
+bool isTargetEligible(dynamic repType) =>
+    normalizeRepType(repType) == kRepTypePermanent;

@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 /* permission_handler removed: location handled via geolocator only */
 import 'package:url_launcher/url_launcher.dart'; 
 import 'dart:convert';
+import '../../utils/firestore_helpers.dart';
 import 'sales_rep_dashboard.dart';
 import 'visit_screen.dart';
 import 'goals_screen.dart';
@@ -734,6 +735,9 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen()));
                 }),
+                                // Wallet is freelance-only; permanent reps and legacy docs
+                // without a type never see the icon (missing type = permanent).
+                if (canAccessWallet(repData?['repType']))
                 _drawerItem(Icons.wallet_outlined, "محفظة العمولات", false, onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const WalletScreen()));
@@ -742,6 +746,8 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const RepStoreLiteScreen()));
                 }),
+                                // Goals are permanent-only; freelance reps never see the icon.
+                if (canViewGoals(repData?['repType']))
                 _drawerItem(Icons.track_changes_outlined, "الأهداف", false, onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const GoalsScreen()));

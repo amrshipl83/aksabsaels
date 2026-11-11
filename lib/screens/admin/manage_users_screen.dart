@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
 import 'performance_dashboard_screen.dart';
+import '../../utils/firestore_helpers.dart';
 
 class ManageUsersScreen extends StatefulWidget {
   const ManageUsersScreen({super.key});
@@ -135,6 +136,15 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
       return const Center(child: CircularProgressIndicator());
     }
     var docs = snapshot.data?.docs ?? [];
+    // Targets distribution is permanent-only: freelance reps never appear
+    // in these lists. Client-side on purpose: legacy docs have no repType
+    // field, so a query filter would wrongly drop them (they count as
+    // permanent via normalizeRepType).
+    if (collectionName == 'salesRep') {
+      docs = docs
+          .where((d) => isTargetEligible((d.data() as Map<String, dynamic>)['repType']))
+          .toList();
+    }
     if (docs.isEmpty) return Center(child: Text("لا توجد سجلات حالياً", style: TextStyle(fontSize: 14.sp)));
     
     return ListView.builder(
@@ -222,7 +232,9 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                   ),
                   
                   // تعديل زر الأهداف بناءً على الصلاحيات وقفل التعديل
-                  if (canIEditTarget)
+                  // دفاعياً: لا زر أهداف لمن ليس مؤهلاً لها حتى لو وصل للكارت.
+                  if (canIEditTarget &&
+                      (collection != 'salesRep' || isTargetEligible(data['repType'])))
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: hasTarget ? Colors.grey[200] : Colors.white,

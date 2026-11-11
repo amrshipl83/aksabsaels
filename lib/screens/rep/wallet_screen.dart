@@ -80,6 +80,12 @@ class _WalletScreenState extends State<WalletScreen> {
               return const Center(child: Text("بيانات المحفظة غير موجودة"));
             }
             var data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
+            // Freelance-only gate (live doc read): permanent reps and legacy
+            // docs without a type never see balance or withdraw actions.
+            if (!canAccessWallet(data['repType'])) {
+              return const Center(
+                  child: Text("المحفظة متاحة لمناديب العمولة (Freelance) فقط."));
+            }
             double balance = ((data['walletBalance'] ?? 0) as num).toDouble();
             String name = data['fullname'] ?? "مندوب مبيعات";
             String phone = data['phone'] ?? "";
@@ -97,7 +103,7 @@ class _WalletScreenState extends State<WalletScreen> {
                     title: "سحب العمولات المتاحة",
                     icon: Icons.account_balance_wallet_rounded,
                     color: kPrimaryColor,
-                    onTap: balance > 0 ? () => _showWithdrawSheet(balance, name, phone) : null,
+                    onTap: balance > 0 ? () => _showWithdrawSheet(balance, name, phone, data['repType']) : null,
                   ),
                   const SizedBox(height: 40),
                   _buildInfoSection(),
@@ -187,7 +193,7 @@ class _WalletScreenState extends State<WalletScreen> {
     );
   }
 
-  void _showWithdrawSheet(double balance, String name, String phone) {
+  void _showWithdrawSheet(double balance, String name, String phone, dynamic repType) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -220,7 +226,7 @@ class _WalletScreenState extends State<WalletScreen> {
             ),
             const SizedBox(height: 25),
             ElevatedButton(
-              onPressed: _isLoading ? null : () => _processWithdraw(balance, name, phone),
+              onPressed: _isLoading ? null : () => _processWithdraw(balance, name, phone, repType),
               style: ElevatedButton.styleFrom(
                 backgroundColor: kPrimaryColor,
                 minimumSize: const Size(double.infinity, 55),
@@ -237,7 +243,15 @@ class _WalletScreenState extends State<WalletScreen> {
     );
   }
 
-  Future<void> _processWithdraw(double balance, String name, String phone) async {
+  Future<void> _processWithdraw(double balance, String name, String phone, dynamic repType) async {
+    // Operation-level gate: even a direct call cannot withdraw for non-freelance.
+    if (!canAccessWallet(repType)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("المحفظة متاحة لمناديب العمولة (Freelance) فقط.")));
+      }
+      return;
+    }
     final validation = validateWithdrawAmount(_amountController.text, balance);
     if (validation != null) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(validation)));
@@ -309,6 +323,11 @@ class _WalletScreenState extends State<WalletScreen> {
         if (data == null || data['uid']?.toString() != user.uid) {
           throw Exception('identity-mismatch');
         }
+        // Type binding: only freelance reps may settle earnings, enforced
+        // against the live doc inside the transaction.
+        if (!canAccessWallet(data['repType'])) {
+          throw Exception('forbidden-rep-type');
+        }
         final current = ((data['walletBalance'] ?? 0) as num).toDouble();
         if (current < amount) throw Exception('insufficient');
         tx.set(reqRef, {
@@ -341,6 +360,8 @@ class _WalletScreenState extends State<WalletScreen> {
         final text = e.toString();
         final msg = text.contains('insufficient')
             ? "عذراً، الرصيد غير كافٍ"
+            : text.contains('forbidden-rep-type')
+                ? "المحفظة متاحة لمناديب العمولة (Freelance) فقط."
             : text.contains('identity-mismatch')
                 ? "تعذر ربط المحفظة بحسابك. أعد تسجيل الدخول."
                 : text.contains('missing-wallet')

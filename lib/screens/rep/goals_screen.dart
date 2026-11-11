@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
+import '../../utils/firestore_helpers.dart';
 
 class GoalsScreen extends StatefulWidget {
   const GoalsScreen({super.key});
@@ -22,6 +23,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
   };
   List<Offset> _chartData = [];
   Map<String, dynamic>? _monthlyGoals;
+  bool _accessDenied = false;
 
   @override
   void initState() {
@@ -35,6 +37,17 @@ class _GoalsScreenState extends State<GoalsScreen> {
       final userDataString = prefs.getString('userData');
       if (userDataString == null) return;
       _userData = jsonDecode(userDataString);
+      // Goals are permanent-only: freelance reps are stopped here, before
+      // any data load, even on direct navigation to this screen.
+      if (!canViewGoals(_userData!['repType'])) {
+        if (mounted) {
+          setState(() {
+            _accessDenied = true;
+            _isLoading = false;
+          });
+        }
+        return;
+      }
       final repCode = _userData!['repCode'];
 
       DateTime now = DateTime.now();
@@ -123,7 +136,10 @@ class _GoalsScreenState extends State<GoalsScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF1ABC9C)))
-          : SingleChildScrollView(
+          : _accessDenied
+              ? const Center(
+                  child: Text("شاشة الأهداف متاحة للموظفين الثابتين (Permanent) فقط."))
+              : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:sizer/sizer.dart';
+import '../../utils/firestore_helpers.dart';
 
 class PerformanceDashboardScreen extends StatefulWidget {
   final String targetDocId;
@@ -32,6 +33,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
   double workingHours = 0;
   int executedVisits = 0;
   Map<String, dynamic> targets = {};
+  bool _repOutsideScope = false;
 
   @override
   void initState() {
@@ -52,14 +54,21 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
             .collection('salesRep')
             .where('supervisorId', isEqualTo: widget.targetDocId)
             .get();
-        codesToQuery = reps.docs.map((d) => d['repCode']?.toString() ?? '').toList();
+        // Supervisor tracking is permanent-only: freelance reps never enter
+        // the aggregated codes (client-side: legacy docs lack the field).
+        codesToQuery = reps.docs
+            .where((d) => isTargetEligible(d['repType']))
+            .map((d) => d['repCode']?.toString() ?? '')
+            .toList();
 
         var supervisorDoc = await FirebaseFirestore.instance.collection('managers').doc(widget.targetDocId).get();
         targets = supervisorDoc.data()?['targets'] ?? {};
       } else {
         codesToQuery = [widget.repCode ?? ''];
         var repDoc = await FirebaseFirestore.instance.collection('salesRep').doc(widget.targetDocId).get();
-        targets = repDoc.data()?['targets'] ?? {};
+        final repData = repDoc.data();
+        targets = repData?['targets'] ?? {};
+        _repOutsideScope = !isTargetEligible(repData?['repType']);
       }
 
       final safeCodes = codesToQuery.where((e) => e.trim().isNotEmpty).toList();
@@ -170,6 +179,20 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildDateFilter(),
+                    if (_repOutsideScope)
+                      Container(
+                        width: double.infinity,
+                        margin: EdgeInsets.only(top: 4.h),
+                        padding: EdgeInsets.all(15.sp),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade50,
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: const Text(
+                          "هذا المندوب حر (Freelance) — خارج نطاق توزيع ومتابعة الأهداف.",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
                     SizedBox(height: 4.h),
                     Text("مؤشرات الأداء الرئيسية (KPIs)",
                         style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
