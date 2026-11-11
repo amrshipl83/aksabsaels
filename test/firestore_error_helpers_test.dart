@@ -19,6 +19,21 @@ void main() {
     });
   });
 
+  group('geoHiddenMessage', () {
+    test('asks to enable location when fix is missing', () {
+      expect(
+        geoHiddenMessage(totalOffers: 3, hasLocation: false),
+        contains('فعّل الموقع'),
+      );
+    });
+    test('says offers are out of range when located', () {
+      expect(
+        geoHiddenMessage(totalOffers: 2, hasLocation: true),
+        contains('خارج نطاق موقعك'),
+      );
+    });
+  });
+
   group('extractFirestoreIndexUrl', () {
     test('extracts console link', () {
       const msg =

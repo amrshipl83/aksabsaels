@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:url_launcher/url_launcher.dart';
 import '../../utils/firestore_error_helpers.dart';
+import '../../utils/geo_areas.dart';
 
 class RepProductsScreen extends StatefulWidget {
   final String subId;
@@ -25,7 +26,7 @@ class RepProductsScreen extends StatefulWidget {
 class _RepProductsScreenState extends State<RepProductsScreen> {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   Position? _currentPosition;
-  Map<String, List<Map<String, double>>> _areaCoordinates = {};
+  Map<String, List<List<AreaPoint>>> _areaPolygons = {};
   bool _isLoading = true;
   final Map<String, Map<String, dynamic>> _demoCart = {};
 
@@ -93,30 +94,11 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
     try {
       String jsonString = await rootBundle.loadString('assets/OSMB-bc319d822a17aa9ad1089fc05e7d4e752460f877.geojson');
       final data = json.decode(jsonString);
-      var features = data['features'] as List;
-      for (var feature in features) {
-        String name = feature['properties']['name'];
-        var coords = feature['geometry']['coordinates'][0][0] as List;
-        _areaCoordinates[name] = coords.map((c) => {
-          'lat': (c[1] as num).toDouble(),
-          'lng': (c[0] as num).toDouble(),
-        }).toList();
-      }
+      _areaPolygons = parseAreaPolygons(data);
+      if (_areaPolygons.isEmpty) debugPrint('GeoAreas: no valid polygons parsed');
     } catch (e) {
       debugPrint("GeoJSON Error: $e");
     }
-  }
-
-  bool _isPointInPolygon(double lat, double lng, List<Map<String, double>> polygon) {
-    bool inside = false;
-    int j = polygon.length - 1;
-    for (int i = 0; i < polygon.length; j = i++) {
-      if (((polygon[i]['lat']! > lat) != (polygon[j]['lat']! > lat)) &&
-          (lng < (polygon[j]['lng']! - polygon[i]['lng']!) * (lat - polygon[i]['lat']!) / (polygon[j]['lat']! - polygon[i]['lat']!) + polygon[i]['lng']!)) {
-        inside = !inside;
-      }
-    }
-    return inside;
   }
 
   double _calculateTotal() {
@@ -195,7 +177,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
             const SizedBox(height: 8),
             SelectableText(error?.toString() ?? 'خطأ غير معروف', style: const TextStyle(fontSize: 11, color: Colors.black87)),
             const SizedBox(height: 6),
-            SelectableText('$debugInfo | $posLine | مناطق محملة: ${_areaCoordinates.length}', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            SelectableText('$debugInfo | $posLine | مناطق محملة: ${_areaPolygons.length}', style: const TextStyle(fontSize: 10, color: Colors.grey)),
             if (needsIndex && url != null) ...[
               const SizedBox(height: 8),
               const Text('الكويري يحتاج فهرس مركب — افتح الرابط لإنشائه:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFE65100))),
@@ -260,17 +242,15 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
 
         var filteredOffers = snapshot.data!.docs.where((doc) {
           var data = doc.data() as Map<String, dynamic>;
-          List? deliveryAreas = data['deliveryAreas'];
-          if (deliveryAreas == null || deliveryAreas.isEmpty) return true;
-          if (_currentPosition == null) return false;
-          return deliveryAreas.any((areaName) {
-            var polygon = _areaCoordinates[areaName];
-            if (polygon == null) return false;
-            return _isPointInPolygon(_currentPosition!.latitude, _currentPosition!.longitude, polygon);
-          });
+          return offerCoversLocation(
+            deliveryAreas: data['deliveryAreas'],
+            lat: _currentPosition?.latitude,
+            lng: _currentPosition?.longitude,
+            areaPolygons: _areaPolygons,
+          );
         }).toList();
 
-        if (filteredOffers.isEmpty) return const SizedBox();
+        if (filteredOffers.isEmpty) { final hiddenTotal = snapshot.data!.docs.length; if (hiddenTotal == 0) return const SizedBox(); return _buildGeoHiddenNote(name, hiddenTotal); }
 
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
@@ -386,6 +366,21 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildGeoHiddenNote(String name, int totalOffers) {
+    final hasLocation = _currentPosition != null;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      color: const Color(0xFFFFF8E1),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.amber.shade200)),
+      child: ListTile(
+        dense: true,
+        leading: Icon(hasLocation ? Icons.location_on_outlined : Icons.location_off_outlined, color: Colors.amber.shade800),
+        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        subtitle: Text(geoHiddenMessage(totalOffers: totalOffers, hasLocation: hasLocation), style: const TextStyle(fontSize: 11)),
+      ),
     );
   }
 

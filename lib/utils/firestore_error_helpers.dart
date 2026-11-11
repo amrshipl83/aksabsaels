@@ -11,6 +11,15 @@ bool isMissingIndexError(Object? error) {
 
 /// Extracts the first https:// console link from a Firestore error message
 /// (the "create index" URL), or null when there is none.
+/// Message for a product whose active offers all fall outside the rep's
+/// current geo coverage (or location is unavailable). Pure for testing.
+String geoHiddenMessage({required int totalOffers, required bool hasLocation}) {
+  if (!hasLocation) {
+    return 'يوجد $totalOffers عروض نشطة — فعّل الموقع لعرض المتاح منها في منطقتك';
+  }
+  return 'يوجد $totalOffers عروض نشطة لكن كلها خارج نطاق موقعك الحالي';
+}
+
 String? extractFirestoreIndexUrl(Object? error) {
   if (error == null) return null;
   final match = RegExp(r'https://[^\s)"]+')

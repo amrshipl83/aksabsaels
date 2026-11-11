@@ -4,12 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'RepTraderOffersScreen.dart';
+import '../../utils/geo_areas.dart';
 
-class Coordinates {
-  final double lat;
-  final double lng;
-  Coordinates({required this.lat, required this.lng});
-}
+typedef Coordinates = AreaPoint;
 
 class RepTradersLiteScreen extends StatefulWidget {
   final Position? initialPosition;
@@ -29,7 +26,7 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
   bool _isLoading = true;
 
   Coordinates? _currentPosition;
-  Map<String, List<Coordinates>> _areaCoordinatesMap = {};
+  Map<String, List<List<Coordinates>>> _areaCoordinatesMap = {};
 
   @override
   void initState() {
@@ -58,16 +55,8 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
     try {
       final String jsonString = await rootBundle.loadString('assets/OSMB-bc319d822a17aa9ad1089fc05e7d4e752460f877.geojson');
       final data = json.decode(jsonString);
-      if (data['features'] != null) {
-        for (var feature in data['features']) {
-          final areaName = feature['properties']?['name'];
-          final geometry = feature['geometry'];
-          if (areaName != null && geometry != null) {
-            List polygonCoords = geometry['type'] == 'MultiPolygon' ? geometry['coordinates'][0][0] : geometry['coordinates'][0];
-            _areaCoordinatesMap[areaName] = polygonCoords.map<Coordinates>((coord) => Coordinates(lat: coord[1].toDouble(), lng: coord[0].toDouble())).toList();
-          }
-        }
-      }
+      _areaCoordinatesMap = parseAreaPolygons(data);
+      if (_areaCoordinatesMap.isEmpty) debugPrint('GeoAreas: no valid polygons parsed');
     } catch (e) { debugPrint("GeoJSON Error: $e"); }
   }
 
@@ -76,17 +65,17 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
       final snapshot = await _db.collection("sellers").where("status", isEqualTo: "active").get();
       List<DocumentSnapshot> availableSellers = [];
       for (var doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        final List? deliveryAreas = data['deliveryAreas'] as List?;
-        if (_currentPosition == null || deliveryAreas == null || deliveryAreas.isEmpty) {
+        final data = doc.data();
+        final dynamic deliveryAreas = data['deliveryAreas'];
+        if (offerCoversLocation(
+          deliveryAreas: deliveryAreas,
+          lat: _currentPosition?.lat,
+          lng: _currentPosition?.lng,
+          areaPolygons: _areaCoordinatesMap,
+          showWhenLocationUnknown: true,
+        )) {
           availableSellers.add(doc);
-          continue;
         }
-        bool isCovered = deliveryAreas.any((areaName) {
-          final polygon = _areaCoordinatesMap[areaName];
-          return (polygon != null) ? _isPointInPolygon(_currentPosition!, polygon) : false;
-        });
-        if (isCovered) availableSellers.add(doc);
       }
       _activeSellers = availableSellers;
       _categories = _getUniqueCategories(_activeSellers);
@@ -105,16 +94,7 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
     });
   }
 
-  bool _isPointInPolygon(Coordinates point, List<Coordinates> polygon) {
-    final x = point.lng; final y = point.lat;
-    bool inside = false;
-    for (int i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      final xi = polygon[i].lng; final yi = polygon[i].lat;
-      final xj = polygon[j].lng; final yj = polygon[j].lat;
-      if (((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
-    }
-    return inside;
-  }
+  // Point-in-polygon math lives in lib/utils/geo_areas.dart (shared chain).
 
   List<String> _getUniqueCategories(List<DocumentSnapshot> sData) {
     final categories = <String>{};
