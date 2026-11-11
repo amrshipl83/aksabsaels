@@ -54,6 +54,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  fake_cloud_firestore: ^3.1.0
 
 # أيقونة تطبيق المبيعات (تأكد من وجود الملف في assets)
 flutter_launcher_icons:

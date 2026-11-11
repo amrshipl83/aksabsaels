@@ -3,11 +3,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
+import 'manager_distribution_dialog.dart';
 import 'performance_dashboard_screen.dart';
 import '../../utils/firestore_helpers.dart';
+import '../../utils/staff_display_name.dart';
+import '../../utils/target_distribution.dart';
 
 class ManageUsersScreen extends StatefulWidget {
-  const ManageUsersScreen({super.key});
+  final FirebaseFirestore? firestore;
+  const ManageUsersScreen({super.key, this.firestore});
 
   @override
   State<ManageUsersScreen> createState() => _ManageUsersScreenState();
@@ -18,7 +22,8 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
   TabController? _tabController;
   final Color kPrimaryColor = const Color(0xFF1ABC9C);
   final Color kSidebarColor = const Color(0xFF2F3542);
-  List<String> _mySupervisorsIds = []; 
+  List<String> _mySupervisorsIds = [];
+  FirebaseFirestore get _db => widget.firestore ?? FirebaseFirestore.instance;
 
   @override
   void initState() {
@@ -46,7 +51,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
 
   Future<void> _fetchSupervisorsList() async {
     String myDocId = _userData?['docId'] ?? '';
-    var snapshot = await FirebaseFirestore.instance
+    var snapshot = await _db
         .collection('managers')
         .where('managerId', isEqualTo: myDocId)
         .get();
@@ -95,8 +100,13 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
         controller: _tabController,
         children: isManager
             ? [
-                _buildUserList('managers', 'managerId'), 
-                _buildAllRepsForManager(), 
+                Column(
+                  children: [
+                    _buildManagerTargetHeader(),
+                    Expanded(child: _buildUserList('managers', 'managerId')),
+                  ],
+                ),
+                _buildAllRepsForManager(),
               ]
             : [
                 _buildUserList('salesRep', 'supervisorId')
@@ -111,7 +121,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
       return Center(child: Text("لا يوجد مشرفين تابعين لك حالياً", style: TextStyle(fontSize: 14.sp)));
     }
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
+      stream: _db
           .collection('salesRep')
           .where('supervisorId', whereIn: _mySupervisorsIds)
           .snapshots(),
@@ -122,11 +132,131 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
   Widget _buildUserList(String collectionName, String filterField) {
     String myDocId = _userData?['docId'] ?? '';
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
+      stream: _db
           .collection(collectionName)
           .where(filterField, isEqualTo: myDocId)
           .snapshots(),
       builder: (context, snapshot) => _handleStreamResult(snapshot, collectionName),
+    );
+  }
+
+  /// بطاقة هدف المدير المستلم من الإدارة للشهر الحالي: المستلم والموزع
+  /// والمتبقي لكل مقياس. قراءة فقط؛ التوزيع يتم من بطاقات المشرفين.
+  /// الهدف المالي هنا للمبيعات فقط ولا يشمل مستهدف الراتب (targetAmount).
+  Widget _buildManagerTargetHeader() {
+    final String myDocId = _userData?['docId'] ?? '';
+    if (myDocId.isEmpty) return const SizedBox.shrink();
+    final String month = targetMonthKey(DateTime.now());
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _db.collection('managers').doc(myDocId).snapshots(),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data() as Map<String, dynamic>?;
+        final summary = summarizeTargetEntry(data?['targets'], month);
+        final bool hasTarget = summary['hasTarget'] as bool;
+        final values = summary['values'] as Map<String, double>;
+        final distributed = summary['distributed'] as Map<String, double>;
+        final remaining =
+            remainingTargets(received: values, distributed: distributed);
+        String fmt(double v) => v == v.roundToDouble()
+            ? v.toInt().toString()
+            : v.toStringAsFixed(1);
+        return Container(
+          margin: EdgeInsets.fromLTRB(12.sp, 12.sp, 12.sp, 0),
+          padding: EdgeInsets.all(14.sp),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(15),
+            border: Border(top: BorderSide(color: kPrimaryColor, width: 4)),
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4))
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.emoji_events_outlined,
+                      color: kPrimaryColor, size: 20.sp),
+                  SizedBox(width: 8.sp),
+                  Expanded(
+                    child: Text("هدفك المستلم من الإدارة — $month",
+                        style: TextStyle(
+                            fontSize: 14.sp,
+                            fontWeight: FontWeight.bold,
+                            color: kSidebarColor)),
+                  ),
+                ],
+              ),
+              SizedBox(height: 4.sp),
+              Text("الهدف المالي هنا للمبيعات فقط ولا يشمل مستهدف الراتب.",
+                  style: TextStyle(fontSize: 10.sp, color: Colors.grey[600])),
+              SizedBox(height: 8.sp),
+              if (!hasTarget)
+                Text("لم يُسند إليك هدف لهذا الشهر بعد.",
+                    style: TextStyle(
+                        fontSize: 12.sp,
+                        color: Colors.orange[800],
+                        fontWeight: FontWeight.bold))
+              else
+                for (final f in kTargetFields)
+                  Padding(
+                    padding: EdgeInsets.symmetric(vertical: 3.sp),
+                    child: Row(
+                      children: [
+                        Expanded(
+                            flex: 3,
+                            child: Text(kTargetLabelsAr[f]!,
+                                style: TextStyle(
+                                    fontSize: 11.sp, color: kSidebarColor))),
+                        Expanded(
+                            flex: 2,
+                            child: Text("مستلم: ${fmt(values[f]!)}",
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 11.sp))),
+                        Expanded(
+                            flex: 2,
+                            child: Text("موزع: ${fmt(distributed[f]!)}",
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    fontSize: 11.sp, color: Colors.teal))),
+                        Expanded(
+                            flex: 2,
+                            child: Text("متبقي: ${fmt(remaining[f]!)}",
+                                textAlign: TextAlign.end,
+                                style: TextStyle(
+                                    fontSize: 11.sp,
+                                    fontWeight: FontWeight.bold,
+                                    color: remaining[f]! < 0
+                                        ? Colors.red
+                                        : kSidebarColor))),
+                      ],
+                    ),
+                  ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showDistributeDialog(
+      String supervisorId, Map<String, dynamic> supData) {
+    final String myDocId = _userData?['docId'] ?? '';
+    if (myDocId.isEmpty) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => ManagerDistributionDialog(
+        db: _db,
+        managerId: myDocId,
+        supervisorId: supervisorId,
+        supervisorName: staffDisplayName(supData),
+        setByUid: myDocId,
+      ),
     );
   }
 
@@ -185,7 +315,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
               builder: (context) => PerformanceDashboardScreen(
                 targetDocId: docId,
                 targetType: targetType,
-                targetName: data['fullname'] ?? 'غير معروف',
+                targetName: staffDisplayName(data),
                 repCode: data['repCode'],
               ),
             ),
@@ -202,7 +332,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(data['fullname'] ?? 'بدون اسم',
+                      Text(staffDisplayName(data),
                           style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold, color: kSidebarColor)),
                       Text(targetType == 'sales_supervisor' ? "مشرف مبيعات" : "مندوب مبيعات",
                           style: TextStyle(fontSize: 11.sp, color: kPrimaryColor, fontWeight: FontWeight.w600)),
@@ -231,9 +361,25 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                     ],
                   ),
                   
-                  // تعديل زر الأهداف بناءً على الصلاحيات وقفل التعديل
+                  // مسار المدير للمشرفين: توزيع هرمي من الهدف المستلم من الإدارة
+                  // (بدل نافذة الهدف المباشرة القديمة التي كانت تستبدل قيد الشهر
+                  // كاملاً). مسار المشرف للمناديب يبقى على النافذة القديمة كما هو.
                   // دفاعياً: لا زر أهداف لمن ليس مؤهلاً لها حتى لو وصل للكارت.
-                  if (canIEditTarget &&
+                  if (_userData?['role'] == 'sales_manager' && collection == 'managers')
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.teal,
+                        side: const BorderSide(color: Colors.teal),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        padding: EdgeInsets.symmetric(horizontal: 10.sp, vertical: 5.sp),
+                      ),
+                      onPressed: () => _showDistributeDialog(docId, data),
+                      icon: Icon(Icons.pie_chart_outline, size: 14.sp),
+                      label: Text("توزيع الهدف", style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.bold)),
+                    )
+                  else if (canIEditTarget &&
                       (collection != 'salesRep' || isTargetEligible(data['repType'])))
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
@@ -244,9 +390,9 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         padding: EdgeInsets.symmetric(horizontal: 10.sp, vertical: 5.sp),
                       ),
-                      onPressed: hasTarget 
+                      onPressed: hasTarget
                         ? () => _showLockedMessage() // لو فيه هدف، ممنوع التعديل
-                        : () => _showTargetModal(docId, data['fullname'], collection),
+                        : () => _showTargetModal(docId, staffDisplayName(data), collection),
                       icon: Icon(hasTarget ? Icons.lock_outline : Icons.edit_calendar, size: 14.sp),
                       label: Text(hasTarget ? "تم القفل" : "الأهداف", style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.bold)),
                     ),
@@ -332,7 +478,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
               if (financialCtrl.text.isEmpty || visitsCtrl.text.isEmpty) return;
               
               String month = DateTime.now().toString().substring(0, 7);
-              await FirebaseFirestore.instance.collection(collection).doc(docId).update({
+              await _db.collection(collection).doc(docId).update({
                 'targets.$month': {
                   'financialTarget': double.tryParse(financialCtrl.text) ?? 0,
                   'visitsTarget': int.tryParse(visitsCtrl.text) ?? 0,
