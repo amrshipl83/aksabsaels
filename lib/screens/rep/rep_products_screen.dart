@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:convert';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:url_launcher/url_launcher.dart';
+import '../../utils/firestore_error_helpers.dart';
 
 class RepProductsScreen extends StatefulWidget {
   final String subId;
@@ -166,6 +168,52 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
     );
   }
 
+  Future<void> _openIndexUrl(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذر فتح الرابط — انسخه من الرسالة')));
+    }
+  }
+
+  Widget _buildQueryError({required String title, required Object? error, required String debugInfo, bool compact = false}) {
+    final url = extractFirestoreIndexUrl(error);
+    final needsIndex = isMissingIndexError(error);
+    final posLine = _currentPosition == null ? 'الموقع: غير متاح' : 'الموقع: ${_currentPosition!.latitude.toStringAsFixed(5)}, ${_currentPosition!.longitude.toStringAsFixed(5)}';
+    return Card(
+      margin: const EdgeInsets.all(12),
+      color: const Color(0xFFFFF3E0),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Color(0xFFFFB74D))),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [const Icon(Icons.warning_amber_rounded, color: Color(0xFFE65100)), const SizedBox(width: 8), Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)))]),
+            const SizedBox(height: 8),
+            SelectableText(error?.toString() ?? 'خطأ غير معروف', style: const TextStyle(fontSize: 11, color: Colors.black87)),
+            const SizedBox(height: 6),
+            SelectableText('$debugInfo | $posLine | مناطق محملة: ${_areaCoordinates.length}', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            if (needsIndex && url != null) ...[
+              const SizedBox(height: 8),
+              const Text('الكويري يحتاج فهرس مركب — افتح الرابط لإنشائه:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFE65100))),
+              const SizedBox(height: 4),
+              SelectableText(url, style: const TextStyle(fontSize: 11, color: Colors.blue)),
+              const SizedBox(height: 8),
+              ElevatedButton.icon(onPressed: () => _openIndexUrl(url), icon: const Icon(Icons.open_in_new, size: 16, color: Colors.white), label: const Text('فتح رابط الفهرس', style: TextStyle(color: Colors.white, fontSize: 12)), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE65100))),
+            ],
+            if (!compact) ...[
+              const SizedBox(height: 8),
+              const Text('تلميح: عروض التاجر بتفتح لكن المنتجات فاضية؟ غالبا أسماء deliveryAreas غير مطابقة لأسماء مناطق ملف GeoJSON.', style: TextStyle(fontSize: 11, color: Colors.black54)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildProductsList() {
     return StreamBuilder<QuerySnapshot>(
       stream: _db.collection('products')
@@ -173,6 +221,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
           .where('status', isEqualTo: 'active')
           .snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) { return _buildQueryError(title: 'تعذر تحميل المنتجات', error: snapshot.error, debugInfo: 'subId: ${widget.subId}'); }
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         if (snapshot.data!.docs.isEmpty) return const Center(child: Text("لا توجد منتجات حالياً في هذا القسم"));
 
@@ -206,6 +255,7 @@ class _RepProductsScreenState extends State<RepProductsScreen> {
           .where('status', isEqualTo: 'active')
           .get(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) { return _buildQueryError(title: 'تعذر تحميل عروض: $name', error: snapshot.error, debugInfo: 'productId: $productId', compact: true); }
         if (!snapshot.hasData) return const SizedBox();
 
         var filteredOffers = snapshot.data!.docs.where((doc) {
