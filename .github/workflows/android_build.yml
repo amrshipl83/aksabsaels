@@ -46,7 +46,7 @@ jobs:
           echo "storeFile=aksabsales.jks" >> android/key.properties
 
       - name: 🏗️ Build Release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --dart-define=TARGET_DISTRIBUTE_URL=https://us-central1-aksab-erp.cloudfunctions.net/distributeTarget
 
       - name: 📤 Upload APK Artifact Only
         uses: actions/upload-artifact@v4
@@ -92,7 +92,7 @@ jobs:
           echo "storeFile=aksabsales.jks" >> android/key.properties
 
       - name: 🏗️ Build Release AAB
-        run: flutter build appbundle --release
+        run: flutter build appbundle --release --dart-define=TARGET_DISTRIBUTE_URL=https://us-central1-aksab-erp.cloudfunctions.net/distributeTarget
 
       - name: 📤 Upload AAB Artifact Only
         uses: actions/upload-artifact@v4
