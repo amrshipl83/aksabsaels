@@ -163,4 +163,30 @@ void main() {
       expect(summary['hasTarget'], isFalse);
     });
   });
+
+  group('monthProgress', () {
+    test('current month reports partial progress', () {
+      final p = monthProgress(
+          now: DateTime(2026, 11, 11), year: 2026, month: 11);
+      expect(p['daysInMonth'], 30);
+      expect(p['elapsedDays'], 11);
+      expect(p['remainingDays'], 19);
+      expect((p['percent'] as double).toStringAsFixed(1), '36.7');
+    });
+
+    test('past month reports 100% with nothing remaining', () {
+      final p = monthProgress(
+          now: DateTime(2026, 11, 11), year: 2026, month: 10);
+      expect(p['percent'], 100);
+      expect(p['remainingDays'], 0);
+    });
+
+    test('future month reports 0% with all days remaining', () {
+      final p = monthProgress(
+          now: DateTime(2026, 11, 11), year: 2026, month: 12);
+      expect(p['percent'], 0);
+      expect(p['elapsedDays'], 0);
+      expect(p['remainingDays'], 31);
+    });
+  });
 }

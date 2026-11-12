@@ -214,6 +214,41 @@ Map<String, dynamic> applyDistributionToManager({
   };
 }
 
+/// Month progress for follow-up headers. Never throws. For the current month
+/// the elapsed share is days passed (including today) over month length; a
+/// past month reports 100% with 0 remaining, a future one 0% with all days
+/// remaining.
+Map<String, dynamic> monthProgress({
+  required DateTime now,
+  required int year,
+  required int month,
+}) {
+  final start = DateTime(year, month, 1);
+  final daysInMonth = DateTime(year, month + 1, 0).day;
+  final end = DateTime(year, month, daysInMonth);
+  final today = DateTime(now.year, now.month, now.day);
+  late final int elapsedDays;
+  late final double percent;
+  if (today.isBefore(start)) {
+    elapsedDays = 0;
+    percent = 0;
+  } else if (today.isAfter(end)) {
+    elapsedDays = daysInMonth;
+    percent = 100;
+  } else {
+    elapsedDays = today.difference(start).inDays + 1;
+    percent = elapsedDays / daysInMonth * 100;
+  }
+  return <String, dynamic>{
+    'start': start,
+    'end': end,
+    'daysInMonth': daysInMonth,
+    'elapsedDays': elapsedDays,
+    'remainingDays': daysInMonth - elapsedDays,
+    'percent': percent,
+  };
+}
+
 /// Reads one month out of a document's `targets` map. Never throws; a
 /// missing month reports `hasTarget: false` with zeroed values.
 Map<String, dynamic> summarizeTargetEntry(Map? targets, String monthKey) {

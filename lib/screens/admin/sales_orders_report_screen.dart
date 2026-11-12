@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:sizer/sizer.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../utils/staff_display_name.dart';
 
 class SalesOrdersReportScreen extends StatefulWidget {
   const SalesOrdersReportScreen({super.key});
@@ -77,11 +78,11 @@ class _SalesOrdersReportScreenState extends State<SalesOrdersReportScreen> {
         List<String> supervisorIds = supervisors.docs.map((d) => d.id).toList();
         if (supervisorIds.isNotEmpty) {
           var reps = await FirebaseFirestore.instance.collection('salesRep').where('supervisorId', whereIn: supervisorIds).get();
-          repsData = reps.docs.map((d) => {'repCode': d['repCode'].toString(), 'repName': d['fullname']}).toList();
+          repsData = reps.docs.map((d) => {'repCode': d['repCode'].toString(), 'repName': staffDisplayName(d.data())}).toList();
         }
       } else if (role == 'sales_supervisor') {
         var reps = await FirebaseFirestore.instance.collection('salesRep').where('supervisorId', isEqualTo: myDocId).get();
-        repsData = reps.docs.map((d) => {'repCode': d['repCode'].toString(), 'repName': d['fullname']}).toList();
+        repsData = reps.docs.map((d) => {'repCode': d['repCode'].toString(), 'repName': staffDisplayName(d.data())}).toList();
       }
       if (mounted) {
         setState(() {
