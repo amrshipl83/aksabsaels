@@ -88,8 +88,11 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         // Supervisor tracking is permanent-only: freelance reps never enter
         // the aggregated codes (client-side: legacy docs lack the field).
         codesToQuery = reps.docs
-            .where((d) => isTargetEligible(d['repType']))
-            .map((d) => d['repCode']?.toString() ?? '')
+            // Null-safe map access: legacy docs lack repType/repCode and
+            // operator [] would throw (caught below as zeros). Missing type
+            // counts as permanent, matching the lists.
+            .where((d) => isTargetEligible(d.data()['repType']))
+            .map((d) => d.data()['repCode']?.toString() ?? '')
             .toList();
 
         var supervisorDoc = await _db.collection('managers').doc(widget.targetDocId).get();

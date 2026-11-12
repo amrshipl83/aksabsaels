@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:sizer/sizer.dart';
 import '../../utils/firestore_helpers.dart';
 import '../../utils/target_distribution.dart';
+import '../../services/target_distribution_service.dart';
 
 /// Supervisor → sales-rep target distribution dialog (supervisor role only).
 ///
@@ -39,7 +40,8 @@ class _RepDistributionDialogState extends State<RepDistributionDialog> {
   String _month = '';
   Map<String, double> _received = {};
   Map<String, double> _othersSum = {};
-  List<String> _allRepIds = [];
+  // NOTE: recipient ids are resolved server-side now; the backend
+  // re-reads every linked doc inside its transaction.
   Map<String, TextEditingController> _ctrls = {};
 
   @override
@@ -108,7 +110,7 @@ class _RepDistributionDialogState extends State<RepDistributionDialog> {
         setState(() {
           _received = received;
           _othersSum = sumAllocations(others);
-          _allRepIds = eligible.map((d) => d.id).toList();
+          // _allRepIds removed: backend resolves linked docs itself.
           _ctrls = {
             for (final f in kTargetFields)
               f: TextEditingController(
@@ -148,17 +150,16 @@ class _RepDistributionDialogState extends State<RepDistributionDialog> {
     }
     setState(() => _error = null);
     try {
-      await distributeRepTarget(
-        db: widget.db,
-        supervisorId: widget.supervisorId,
-        repId: widget.repId,
-        allRepIds: _allRepIds,
+      // Backend save (Admin SDK): client rules allow self-only writes,
+      // so the cross-doc transaction moved server-side.
+      await distributeTargetViaBackend(
+        holderId: widget.supervisorId,
+        recipientId: widget.repId,
+        kind: 'supervisor_rep',
         month: _month,
         values: raw,
-        setByUid: widget.setByUid,
-        now: DateTime.now(),
       );
-    } on StateError catch (e) {
+    } on TargetDistributeException catch (e) {
       if (mounted) setState(() => _error = e.message);
       return;
     } catch (e) {

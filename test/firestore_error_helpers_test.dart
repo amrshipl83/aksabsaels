@@ -34,6 +34,42 @@ void main() {
     });
   });
 
+  group('isPermissionDeniedError', () {
+    test('detects permission-denied variants', () {
+      expect(
+        isPermissionDeniedError(
+            '[cloud_firestore/permission-denied] Missing or insufficient permissions.'),
+        isTrue,
+      );
+      expect(isPermissionDeniedError('permission-denied'), isTrue);
+    });
+    test('rejects index errors, unrelated text and null', () {
+      expect(isPermissionDeniedError('requires an index'), isFalse);
+      expect(isPermissionDeniedError('boom'), isFalse);
+      expect(isPermissionDeniedError(null), isFalse);
+    });
+  });
+
+  group('describeQueryErrorAr', () {
+    test('points to the missing index for index errors', () {
+      expect(
+        describeQueryErrorAr(
+            '[cloud_firestore/failed-precondition] requires an index'),
+        contains('فهرس'),
+      );
+    });
+    test('points to protection rules for permission errors', () {
+      expect(
+        describeQueryErrorAr('permission-denied'),
+        contains('صلاحية'),
+      );
+    });
+    test('falls back to the raw message otherwise', () {
+      expect(describeQueryErrorAr('boom'), contains('boom'));
+      expect(describeQueryErrorAr(null), contains('خطأ غير معروف'));
+    });
+  });
+
   group('extractFirestoreIndexUrl', () {
     test('extracts console link', () {
       const msg =

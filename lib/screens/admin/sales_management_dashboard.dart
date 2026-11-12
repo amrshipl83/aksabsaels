@@ -11,7 +11,7 @@ import '../../utils/firestore_helpers.dart';
 import 'sales_orders_report_screen.dart';
 import 'customers_report_screen.dart';
 import 'offers_screen.dart';
-import 'profile_screen.dart'; 
+import 'profile_screen.dart';
 import '../rep/shira_voice_chat_widget.dart';
 
 class SalesManagementDashboard extends StatefulWidget {
@@ -34,7 +34,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   int totalOrders = 0;
   double totalSales = 0;
   int totalAgents = 0;
-  int secondaryStat = 0; 
+  int secondaryStat = 0;
 
   @override
   void initState() {
@@ -110,13 +110,15 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             .where('supervisorId', isEqualTo: myDocId)
             .get();
         // Tracking is permanent-only (client-side: legacy docs lack repType).
-        final eligibleAgents = agentsSnap.docs.where((doc) => isTargetEligible(doc['repType'])).toList();
-        repCodes = eligibleAgents.map((doc) => doc['repCode'] as String).toList();
+        // Null-safe map access: operator [] throws on legacy docs missing
+        // the field; missing type counts as permanent, missing code is ''.
+        final eligibleAgents = agentsSnap.docs.where((doc) => isTargetEligible(doc.data()['repType'])).toList();
+        repCodes = eligibleAgents.map((doc) => doc.data()['repCode']?.toString() ?? '').toList();
         totalAgents = eligibleAgents.length;
 
         if (repCodes.isNotEmpty) {
            final customersSnap = await FirebaseFirestore.instance
-               .collection('deliverySupermarkets') 
+               .collection('deliverySupermarkets')
                .where('ownerId', whereIn: repCodes)
                .get();
            secondaryStat = customersSnap.size;
@@ -126,7 +128,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
             .collection('managers')
             .where('managerId', isEqualTo: myDocId)
             .get();
-        secondaryStat = supervisorsSnap.size; 
+        secondaryStat = supervisorsSnap.size;
 
         List<String> supervisorIds = supervisorsSnap.docs.map((d) => d.id).toList();
         if (supervisorIds.isNotEmpty) {
@@ -135,8 +137,10 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
               .where('supervisorId', whereIn: supervisorIds)
               .get();
           // Tracking is permanent-only (client-side: legacy docs lack repType).
-          final eligibleAgents = agentsSnap.docs.where((doc) => isTargetEligible(doc['repType'])).toList();
-          repCodes = eligibleAgents.map((doc) => doc['repCode'] as String).toList();
+          // Null-safe map access: operator [] throws on legacy docs missing
+          // the field; missing type counts as permanent, missing code is ''.
+          final eligibleAgents = agentsSnap.docs.where((doc) => isTargetEligible(doc.data()['repType'])).toList();
+          repCodes = eligibleAgents.map((doc) => doc.data()['repCode']?.toString() ?? '').toList();
           totalAgents = eligibleAgents.length;
         }
       }
@@ -163,7 +167,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   // --- 🎙️ فتح شاشة المساعد الصوتي شيرا مع تمرير المعطيات المطلوبة ---
   void _openShiraVoiceChat() {
     String userRole = _userData?['role'] ?? 'sales_supervisor';
-    
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -225,7 +229,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
                     child: Image.asset(
                       'assets/images/shira_logo.png',
                       fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => 
+                      errorBuilder: (context, error, stackTrace) =>
                           Icon(Icons.psychology_rounded, color: kPrimaryColor, size: 22.sp),
                     ),
                   ),
@@ -269,7 +273,7 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
                     width: 52,
                     height: 52,
                     fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => 
+                    errorBuilder: (context, error, stackTrace) =>
                         const Icon(Icons.mic, color: Colors.white, size: 28),
                   ),
                 ),

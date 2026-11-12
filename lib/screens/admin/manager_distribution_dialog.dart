@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:sizer/sizer.dart';
 import '../../utils/target_distribution.dart';
+import '../../services/target_distribution_service.dart';
 
 /// Manager → supervisor target distribution dialog (manager role only).
 ///
@@ -39,7 +40,8 @@ class _ManagerDistributionDialogState
   String _month = '';
   Map<String, double> _received = {};
   Map<String, double> _othersSum = {};
-  List<String> _allSupervisorIds = [];
+  // NOTE: recipient ids are resolved server-side now; the backend
+  // re-reads every linked doc inside its transaction.
   Map<String, TextEditingController> _ctrls = {};
 
   @override
@@ -103,7 +105,7 @@ class _ManagerDistributionDialogState
         setState(() {
           _received = received;
           _othersSum = sumAllocations(others);
-          _allSupervisorIds = supsSnap.docs.map((d) => d.id).toList();
+          // _allSupervisorIds removed: backend resolves linked docs itself.
           _ctrls = {
             for (final f in kTargetFields)
               f: TextEditingController(
@@ -143,17 +145,16 @@ class _ManagerDistributionDialogState
     }
     setState(() => _error = null);
     try {
-      await distributeSupervisorTarget(
-        db: widget.db,
-        managerId: widget.managerId,
-        supervisorId: widget.supervisorId,
-        allSupervisorIds: _allSupervisorIds,
+      // Backend save (Admin SDK): client rules allow self-only writes,
+      // so the cross-doc transaction moved server-side.
+      await distributeTargetViaBackend(
+        holderId: widget.managerId,
+        recipientId: widget.supervisorId,
+        kind: 'manager_supervisor',
         month: _month,
         values: raw,
-        setByUid: widget.setByUid,
-        now: DateTime.now(),
       );
-    } on StateError catch (e) {
+    } on TargetDistributeException catch (e) {
       if (mounted) setState(() => _error = e.message);
       return;
     } catch (e) {

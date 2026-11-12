@@ -6,6 +6,7 @@ import 'package:sizer/sizer.dart';
 import 'manager_distribution_dialog.dart';
 import 'rep_distribution_dialog.dart';
 import 'performance_dashboard_screen.dart';
+import '../../utils/firestore_error_helpers.dart';
 import '../../utils/firestore_helpers.dart';
 import '../../utils/staff_display_name.dart';
 import '../../utils/target_distribution.dart';
@@ -156,6 +157,25 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
     return StreamBuilder<DocumentSnapshot>(
       stream: _db.collection('managers').doc(myDocId).snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Container(
+            margin: EdgeInsets.fromLTRB(12.sp, 12.sp, 12.sp, 0),
+            padding: EdgeInsets.all(14.sp),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(15),
+              border: const Border(top: BorderSide(color: Colors.redAccent, width: 4)),
+            ),
+            child: _queryErrorBody(snapshot.error),
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(
+              child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator()));
+        }
         final data = snapshot.data?.data() as Map<String, dynamic>?;
         final summary = summarizeTargetEntry(data?['targets'], month);
         final bool hasTarget = summary['hasTarget'] as bool;
@@ -282,8 +302,41 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
     );
   }
 
+  /// Stream failure body: names the real cause (missing index vs rules)
+  /// and shows the console "create index" link when Firestore provides one,
+  /// so a grey/generic screen becomes an actionable message.
+  Widget _queryErrorBody(Object? error) {
+    final url = extractFirestoreIndexUrl(error);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.error_outline, color: Colors.redAccent, size: 28.sp),
+        SizedBox(height: 8.sp),
+        Text(describeQueryErrorAr(error),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 13.sp,
+                fontWeight: FontWeight.bold,
+                color: kSidebarColor)),
+        if (url != null) ...[
+          SizedBox(height: 8.sp),
+          SelectableText(url,
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11.sp, color: Colors.blue)),
+        ],
+      ],
+    );
+  }
+
   Widget _handleStreamResult(AsyncSnapshot<QuerySnapshot> snapshot, String collectionName) {
-    if (snapshot.hasError) return const Center(child: Text("حدث خطأ في جلب البيانات"));
+    if (snapshot.hasError) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(16.sp),
+          child: _queryErrorBody(snapshot.error),
+        ),
+      );
+    }
     if (snapshot.connectionState == ConnectionState.waiting) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -311,7 +364,11 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
 
   Widget _buildUserCard(Map<String, dynamic> data, String docId, String collection) {
     String currentMonth = DateTime.now().toString().substring(0, 7);
-    bool hasTarget = data['targets']?[currentMonth] != null;
+    // Hardened: a non-map or mistyped targets/repCode/phone value must never
+    // crash the build (grey screen) — fall back to empty/absent instead.
+    final targetsRaw = data['targets'];
+    bool hasTarget =
+        targetsRaw is Map && targetsRaw[currentMonth] != null;
     String targetType = (collection == 'managers') ? 'sales_supervisor' : 'sales';
 
     return Card(
@@ -328,7 +385,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                 targetDocId: docId,
                 targetType: targetType,
                 targetName: staffDisplayName(data),
-                repCode: data['repCode'],
+                repCode: data['repCode']?.toString(),
               ),
             ),
           );
@@ -354,8 +411,10 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                 ],
               ),
               const Divider(height: 25),
-              _infoRow(Icons.badge_outlined, "الكود:", data['repCode'] ?? 'إدارة'),
-              _infoRow(Icons.phone_android, "الهاتف:", data['phone'] ?? '-'),
+              _infoRow(Icons.badge_outlined, "الكود:",
+                  (data['repCode'] ?? 'إدارة').toString()),
+              _infoRow(Icons.phone_android, "الهاتف:",
+                  (data['phone'] ?? '-').toString()),
               const SizedBox(height: 15),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
