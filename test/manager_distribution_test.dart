@@ -305,15 +305,18 @@ void main() {
   });
 
   group('role gating', () {
-    testWidgets('supervisor sees no distribution tools', (tester) async {
+    testWidgets('supervisor gets rep-level tools, not manager-level ones',
+        (tester) async {
       final fake = await seed();
       await pumpAs(tester, fake, {
         'docId': 's1',
         'role': 'sales_supervisor',
         'fullname': 'مشرف أول',
       });
-      expect(find.text('توزيع الهدف'), findsNothing);
-      expect(find.text('هدفك المستلم من الإدارة'), findsNothing);
+      // Phase 3: the supervisor distributes to their own permanent reps…
+      expect(find.text('توزيع الهدف'), findsOneWidget);
+      // …but never sees the manager-level received-target header.
+      expect(find.textContaining('هدفك المستلم من الإدارة'), findsNothing);
       // Own permanent rep listed; freelance rep excluded.
       expect(find.text('مندوب ثابت'), findsOneWidget);
       expect(find.text('مندوب حر'), findsNothing);

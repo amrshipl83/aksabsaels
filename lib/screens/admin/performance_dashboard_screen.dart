@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
 import 'package:sizer/sizer.dart';
 import '../../utils/firestore_helpers.dart';
 import '../../utils/target_distribution.dart';
@@ -62,10 +61,10 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     super.initState();
     // Supervisor follow-up is month-based: bound the range to the whole
     // selected month. The rep branch keeps its day-range filter.
-    if (widget.targetType == 'sales_supervisor') {
-      _startDate = DateTime(_selYear, _selMonth, 1);
-      _endDate = DateTime(_selYear, _selMonth + 1, 0);
-    }
+    // Follow-up is month-based for both roles now: bound the range to the
+    // whole selected month.
+    _startDate = DateTime(_selYear, _selMonth, 1);
+    _endDate = DateTime(_selYear, _selMonth + 1, 0);
     _fetchData();
   }
 
@@ -207,9 +206,6 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
 
   @override
   Widget build(BuildContext context) {
-    String currentMonth = DateFormat('yyyy-MM').format(_startDate);
-    // تأمين جلب الهدف لتجنب أخطاء الـ null
-    var currentTarget = targets[currentMonth] is Map ? targets[currentMonth] : {};
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
@@ -231,33 +227,9 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: EdgeInsets.all(15.sp),
-                child: widget.targetType == 'sales_supervisor'
-                    ? _buildSupervisorBody()
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildDateFilter(),
-                          if (_repOutsideScope)
-                            Container(
-                              width: double.infinity,
-                              margin: EdgeInsets.only(top: 4.h),
-                              padding: EdgeInsets.all(15.sp),
-                              decoration: BoxDecoration(
-                                color: Colors.amber.shade50,
-                                borderRadius: BorderRadius.circular(15),
-                              ),
-                              child: const Text(
-                                "هذا المندوب حر (Freelance) — خارج نطاق توزيع ومتابعة الأهداف.",
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          SizedBox(height: 4.h),
-                          Text("مؤشرات الأداء الرئيسية (KPIs)",
-                              style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
-                          SizedBox(height: 2.h),
-                          _buildKpiGrid(currentTarget),
-                        ],
-                      ),
+                child: _buildFollowUpBody(
+                    isSupervisor:
+                        widget.targetType == 'sales_supervisor'),
               ),
             ),
     );
@@ -283,9 +255,10 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       ? '${v.toInt()}%'
       : '${v.toStringAsFixed(1)}%';
 
-  /// Supervisor follow-up body: month header + supervisor card + the five
-  /// team indicators, each with goal / actual / real percent / remaining.
-  Widget _buildSupervisorBody() {
+  /// Monthly follow-up body (supervisor or rep): month header, info card
+  /// and the five indicators, each with goal / actual / real percent /
+  /// remaining. Out-of-hierarchy viewers (freelance) get an explicit badge.
+  Widget _buildFollowUpBody({required bool isSupervisor}) {
     final entry = targets[_monthKey];
     final values = normalizeTargets(entry is Map ? entry : null);
     final prog =
@@ -295,20 +268,37 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       children: [
         _buildMonthHeader(prog),
         SizedBox(height: 2.h),
-        _buildSupervisorInfoCard(),
+        if (!isSupervisor && _repOutsideScope)
+          Container(
+            width: double.infinity,
+            margin: EdgeInsets.only(bottom: 2.h),
+            padding: EdgeInsets.all(15.sp),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: const Text(
+              "هذا المندوب حر (Freelance) — خارج نطاق توزيع ومتابعة الأهداف.",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        _buildFollowUpInfoCard(isSupervisor: isSupervisor),
         SizedBox(height: 2.h),
-        Text('مؤشرات الفريق الخمسة',
+        Text(isSupervisor ? 'مؤشرات الفريق الخمسة' : 'المؤشرات الخمسة',
             style: TextStyle(
                 fontSize: 15.sp,
                 fontWeight: FontWeight.bold,
                 color: Colors.blueGrey)),
         SizedBox(height: 1.h),
         _supKpiCard(
-          title: 'ساعات عمل الفريق',
+          title: isSupervisor ? 'ساعات عمل الفريق' : 'ساعات العمل',
           actual: workingHours,
           goal: values['hoursTarget']!,
           unit: 'ساعة',
-          teamHours: true,
+          teamHours: isSupervisor,
+          note: isSupervisor
+              ? 'ساعات الفريق فقط — لا تشمل ساعات المشرف الشخصية.'
+              : 'ساعات عملك الشخصية — مرتبطة بالراتب الأساسي.',
         ),
         _supKpiCard(
           title: 'الفواتير / الأوردرات',
@@ -327,6 +317,9 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
           actual: executedVisits.toDouble(),
           goal: values['visitsTarget']!,
           unit: 'زيارة',
+          note: isSupervisor
+              ? 'زياراتك وزيارات فريقك (تُحسب زيارتك برمز زيارتك إن وُجد).'
+              : 'زياراتك المسجلة خلال الشهر.',
         ),
         _supKpiCard(
           title: 'الهدف المالي',
@@ -334,7 +327,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
           goal: values['financialTarget']!,
           unit: 'ج.م',
         ),
-        _buildCountingNote(),
+        _buildCountingNote(isSupervisor: isSupervisor),
       ],
     );
   }
@@ -411,7 +404,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     );
   }
 
-  Widget _buildSupervisorInfoCard() {
+  Widget _buildFollowUpInfoCard({required bool isSupervisor}) {
     return Container(
       width: double.infinity,
       padding: EdgeInsets.all(14.sp),
@@ -428,8 +421,10 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
           CircleAvatar(
             backgroundColor: _kSidebar,
             radius: 24.sp,
-            child: Icon(Icons.supervisor_account,
-                color: Colors.white, size: 24.sp),
+            child: Icon(
+                isSupervisor ? Icons.supervisor_account : Icons.person,
+                color: Colors.white,
+                size: 24.sp),
           ),
           SizedBox(width: 12.sp),
           Expanded(
@@ -440,7 +435,10 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
                     style: TextStyle(
                         fontSize: 15.sp, fontWeight: FontWeight.bold)),
                 SizedBox(height: 4.sp),
-                Text('عدد المندوبين التابعين: $_repCount',
+                Text(
+                    isSupervisor
+                        ? 'عدد المندوبين التابعين: $_repCount'
+                        : 'كود المندوب: ${widget.repCode ?? '—'}',
                     style:
                         TextStyle(fontSize: 12.sp, color: Colors.grey[700])),
               ],
@@ -457,6 +455,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     required double goal,
     required String unit,
     bool teamHours = false,
+    String? note,
   }) {
     final bool hasGoal = goal > 0;
     final double pct = hasGoal ? actual / goal * 100 : 0;
@@ -509,9 +508,9 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
                 ),
             ],
           ),
-          if (teamHours) ...[
+          if (note != null) ...[
             SizedBox(height: 4.sp),
-            Text('ساعات الفريق فقط — لا تشمل ساعات المشرف الشخصية.',
+            Text(note,
                 style: TextStyle(fontSize: 10.sp, color: Colors.grey[600])),
           ],
           SizedBox(height: 6.sp),
@@ -554,7 +553,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     );
   }
 
-  Widget _buildCountingNote() {
+  Widget _buildCountingNote({required bool isSupervisor}) {
     return Container(
       width: double.infinity,
       margin: EdgeInsets.only(top: 4.sp),
@@ -563,150 +562,16 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         color: Colors.amber.shade50,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: const Text(
-        'طريقة العد: الفواتير تشمل جميع الحالات بما فيها الملغاة (دون تغيير في التعريف)؛ '
-        'العملاء مميزون بمعرف العميل الثابت؛ الزيارات تشمل المشرف (برمز زيارته إن وُجد) وفريقه؛ '
-        'الساعات للفريق فقط.',
-        style: TextStyle(fontSize: 11),
+      child: Text(
+        isSupervisor
+            ? 'طريقة العد: الفواتير تشمل جميع الحالات بما فيها الملغاة (دون تغيير في التعريف)؛ '
+                'العملاء مميزون بمعرف العميل الثابت؛ الزيارات تشمل المشرف (برمز زيارته إن وُجد) وفريقه؛ '
+                'الساعات للفريق فقط.'
+            : 'طريقة العد: الفواتير تشمل جميع الحالات بما فيها الملغاة (دون تغيير في التعريف)؛ '
+                'العملاء مميزون بمعرف العميل الثابت.',
+        style: const TextStyle(fontSize: 11),
       ),
     );
   }
 
-  Widget _buildDateFilter() {
-    return Container(
-      padding: EdgeInsets.all(15.sp),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _dateTile("من تاريخ", _startDate, (date) {
-            if (date != null) {
-              setState(() => _startDate = date);
-              _fetchData();
-            }
-          }),
-          Container(width: 1, height: 40, color: Colors.grey[200]),
-          _dateTile("إلى تاريخ", _endDate, (date) {
-            if (date != null) {
-              setState(() => _endDate = date);
-              _fetchData();
-            }
-          }),
-          CircleAvatar(
-            backgroundColor: const Color(0xFF1ABC9C).withOpacity(0.1),
-            radius: 20.sp,
-            child: IconButton(
-              icon: Icon(Icons.refresh, color: const Color(0xFF1ABC9C), size: 18.sp),
-              onPressed: _fetchData,
-            ),
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _dateTile(String label, DateTime date, Function(DateTime?) onSelect) {
-    return InkWell(
-      onTap: () async {
-        final picked = await showDatePicker(
-          context: context,
-          initialDate: date,
-          firstDate: DateTime(2025),
-          lastDate: DateTime(2030),
-        );
-        onSelect(picked);
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: TextStyle(fontSize: 11.sp, color: Colors.grey[600])),
-          Text(DateFormat('yyyy-MM-dd').format(date),
-              style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.bold, color: const Color(0xFF2F3542))),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildKpiGrid(Map<dynamic, dynamic> currentTarget) {
-    // تأمين استخراج القيم المضافة للأهداف
-    double financialGoal = double.tryParse(currentTarget['financialTarget']?.toString() ?? '0') ?? 0;
-    double visitsGoal = double.tryParse(currentTarget['visitsTarget']?.toString() ?? '0') ?? 0;
-
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
-      mainAxisSpacing: 15.sp,
-      crossAxisSpacing: 15.sp,
-      childAspectRatio: 0.82,
-      children: [
-        _kpiCard("إجمالي المبيعات", totalSales, financialGoal, isCurrency: true),
-        _kpiCard("الزيارات المنفذة", executedVisits.toDouble(), visitsGoal, unit: "زيارة"),
-        _kpiCard("عدد الأوردرات", totalOrders.toDouble(), 0),
-        _kpiCard("عملاء فعالين", activeCustomers.toDouble(), 0),
-        _kpiCard("ساعات العمل", workingHours, 0, unit: "ساعة"),
-      ],
-    );
-  }
-
-  Widget _kpiCard(String title, double actual, double goal, {bool isCurrency = false, String unit = ''}) {
-    // حماية من القسمة على صفر (تأمين جوجل)
-    double percentage = (goal > 0) ? (actual / goal) : 0;
-    double displayProgress = percentage > 1 ? 1.0 : percentage;
-
-    return Container(
-      padding: EdgeInsets.all(15.sp),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 15, offset: const Offset(0, 5))],
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(title,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11.sp, color: Colors.blueGrey, fontWeight: FontWeight.bold)),
-          SizedBox(height: 10.sp),
-          FittedBox(
-            child: Text(
-              isCurrency ? "${NumberFormat("#,###").format(actual)} ج.م" : "${actual.toStringAsFixed(1)} $unit",
-              style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.w900, color: const Color(0xFF1ABC9C)),
-            ),
-          ),
-          if (goal > 0) ...[
-            const Spacer(),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text("الهدف: ${goal.toInt()}", style: TextStyle(fontSize: 9.sp, color: Colors.grey[600])),
-                Text("${(percentage * 100).toInt()}%",
-                    style: TextStyle(
-                        fontSize: 10.sp,
-                        fontWeight: FontWeight.bold,
-                        color: percentage >= 1 ? Colors.green : Colors.orange)),
-              ],
-            ),
-            SizedBox(height: 8.sp),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: LinearProgressIndicator(
-                value: displayProgress,
-                backgroundColor: Colors.grey[100],
-                valueColor: AlwaysStoppedAnimation<Color>(percentage >= 1 ? Colors.green : const Color(0xFF1ABC9C)),
-                minHeight: 8.sp,
-              ),
-            ),
-          ] else ...[
-            const Spacer(),
-            Text("لا يوجد هدف محدد", style: TextStyle(fontSize: 9.sp, color: Colors.grey[400])),
-          ]
-        ],
-      ),
-    );
-  }
 }

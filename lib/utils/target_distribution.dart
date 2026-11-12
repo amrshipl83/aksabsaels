@@ -127,14 +127,16 @@ String? validateDistribution({
   return null;
 }
 
-/// Builds a supervisor's `targets.<month>` entry. Merges over any existing
-/// month entry so unrelated keys are preserved; only the five indicators,
-/// audit fields, status and history are written. Previous history is kept
-/// (capped at 50 entries, oldest dropped) — edits never erase the log.
-Map<String, dynamic> buildSupervisorTargetEntry({
+/// Builds a recipient's (`managers` supervisor or `salesRep` rep)
+/// `targets.<month>` entry. Merges over any existing month entry so unrelated
+/// keys are preserved; only the five indicators, audit fields, status and
+/// history are written. Previous history is kept (capped at 50 entries,
+/// oldest dropped) — edits never erase the log.
+Map<String, dynamic> buildRecipientTargetEntry({
   required Map? existingEntry,
   required Map<String, dynamic> values,
   required String setByUid,
+  required String setByRole,
   required DateTime now,
 }) {
   final normalized = normalizeTargets(values);
@@ -150,7 +152,7 @@ Map<String, dynamic> buildSupervisorTargetEntry({
   history.add(<String, dynamic>{
     'at': now,
     'byUid': setByUid,
-    'byRole': 'sales_manager',
+    'byRole': setByRole,
     'changes': Map<String, double>.from(normalized),
     'note': 'set',
   });
@@ -161,7 +163,7 @@ Map<String, dynamic> buildSupervisorTargetEntry({
     ...base,
     ...normalized,
     'setByUid': setByUid,
-    'setByRole': 'sales_manager',
+    'setByRole': setByRole,
     'setAt': base['setAt'] ?? now,
     'updatedAt': now,
     'status': kTargetStatusAssigned,
@@ -172,17 +174,34 @@ Map<String, dynamic> buildSupervisorTargetEntry({
   };
 }
 
-/// Returns the updated manager month entry after a distribution: received
+/// Backwards-compatible wrapper: manager → supervisor distribution.
+Map<String, dynamic> buildSupervisorTargetEntry({
+  required Map? existingEntry,
+  required Map<String, dynamic> values,
+  required String setByUid,
+  required DateTime now,
+}) =>
+    buildRecipientTargetEntry(
+      existingEntry: existingEntry,
+      values: values,
+      setByUid: setByUid,
+      setByRole: 'sales_manager',
+      now: now,
+    );
+
+/// Returns the updated holder month entry after a distribution: received
 /// values untouched, `distributed` refreshed to the new totals, one audit
 /// record appended (previous history preserved, capped at 50).
-Map<String, dynamic> applyDistributionToManager({
-  required Map managerEntry,
+Map<String, dynamic> applyDistributionToHolder({
+  required Map holderEntry,
   required Map<String, double> distributed,
   required String setByUid,
-  required String supervisorId,
+  required String setByRole,
+  required String recipientKey,
+  required String recipientId,
   required DateTime now,
 }) {
-  final base = Map<String, dynamic>.from(managerEntry);
+  final base = Map<String, dynamic>.from(holderEntry);
   final received = normalizeTargets(base);
   final fully = kTargetFields.every(
       (f) => distributed[f]! + 1e-9 >= received[f]!);
@@ -195,9 +214,9 @@ Map<String, dynamic> applyDistributionToManager({
   history.add(<String, dynamic>{
     'at': now,
     'byUid': setByUid,
-    'byRole': 'sales_manager',
+    'byRole': setByRole,
     'changes': <String, dynamic>{
-      'supervisorId': supervisorId,
+      recipientKey: recipientId,
       'distributed': Map<String, double>.from(distributed),
     },
     'note': 'distribute',
@@ -213,6 +232,24 @@ Map<String, dynamic> applyDistributionToManager({
     'history': history,
   };
 }
+
+/// Backwards-compatible wrapper: manager → supervisor distribution.
+Map<String, dynamic> applyDistributionToManager({
+  required Map managerEntry,
+  required Map<String, double> distributed,
+  required String setByUid,
+  required String supervisorId,
+  required DateTime now,
+}) =>
+    applyDistributionToHolder(
+      holderEntry: managerEntry,
+      distributed: distributed,
+      setByUid: setByUid,
+      setByRole: 'sales_manager',
+      recipientKey: 'supervisorId',
+      recipientId: supervisorId,
+      now: now,
+    );
 
 /// Month progress for follow-up headers. Never throws. For the current month
 /// the elapsed share is days passed (including today) over month length; a
@@ -278,47 +315,52 @@ Map<String, dynamic> summarizeTargetEntry(Map? targets, String monthKey) {
   };
 }
 
-/// Atomically distributes one supervisor's share of the manager's monthly
-/// target. Everything is re-read inside the transaction, so two concurrent
-/// saves cannot jointly exceed the manager's target: the second one sees
-/// the first one's write and fails validation.
+/// Atomically distributes one recipient's share of a holder's monthly target
+/// (manager → supervisor, or supervisor → rep). Everything is re-read inside
+/// the transaction, so two concurrent saves cannot jointly exceed the
+/// holder's target: the second one sees the first one's write and fails
+/// validation.
 ///
-/// Throws [StateError] with an Arabic message when the manager has no
-/// target for [month] or the proposal exceeds the remaining share.
-Future<void> distributeSupervisorTarget({
+/// Throws [StateError] with an Arabic message when the holder has no target
+/// for [month] or the proposal exceeds the remaining share.
+Future<void> distributeAllocatedTarget({
   required FirebaseFirestore db,
-  required String managerId,
-  required String supervisorId,
-  required List<String> allSupervisorIds,
+  required String holderCollection,
+  required String holderId,
+  required String recipientCollection,
+  required String recipientId,
+  required List<String> allRecipientIds,
   required String month,
   required Map<String, dynamic> values,
   required String setByUid,
+  required String setByRole,
+  required String recipientKey,
   required DateTime now,
 }) async {
   final proposed = normalizeTargets(values);
   await db.runTransaction((tx) async {
-    final managerRef = db.collection('managers').doc(managerId);
-    final managerSnap = await tx.get(managerRef);
-    final managerData = managerSnap.data() ?? <String, dynamic>{};
-    final managerTargets = (managerData['targets'] is Map)
-        ? Map<String, dynamic>.from(managerData['targets'] as Map)
+    final holderRef = db.collection(holderCollection).doc(holderId);
+    final holderSnap = await tx.get(holderRef);
+    final holderData = holderSnap.data() ?? <String, dynamic>{};
+    final holderTargets = (holderData['targets'] is Map)
+        ? Map<String, dynamic>.from(holderData['targets'] as Map)
         : <String, dynamic>{};
-    final managerEntry = managerTargets[month];
-    if (managerEntry is! Map) {
+    final holderEntry = holderTargets[month];
+    if (holderEntry is! Map) {
       throw StateError('لا يوجد هدف مسند لهذا الشهر بعد');
     }
-    final received = normalizeTargets(managerEntry);
+    final received = normalizeTargets(holderEntry);
 
-    // Re-read every supervised supervisor inside the transaction.
+    // Re-read every recipient inside the transaction.
     final othersEntries = <Map<String, dynamic>>[];
-    for (final id in allSupervisorIds) {
-      final snap = await tx.get(db.collection('managers').doc(id));
+    for (final id in allRecipientIds) {
+      final snap = await tx.get(db.collection(recipientCollection).doc(id));
       final data = snap.data() ?? <String, dynamic>{};
       final targets = (data['targets'] is Map)
           ? Map<String, dynamic>.from(data['targets'] as Map)
           : <String, dynamic>{};
       final entry = targets[month];
-      if (id != supervisorId && entry is Map) {
+      if (id != recipientId && entry is Map) {
         othersEntries.add(Map<String, dynamic>.from(entry));
       }
     }
@@ -332,35 +374,92 @@ Future<void> distributeSupervisorTarget({
       throw StateError(capError);
     }
 
-    // Supervisor entry (merged, history preserved).
-    final supervisorRef = db.collection('managers').doc(supervisorId);
-    final supervisorSnap = await tx.get(supervisorRef);
-    final supervisorData =
-        Map<String, dynamic>.from(supervisorSnap.data() ?? {});
-    final supervisorTargets = (supervisorData['targets'] is Map)
-        ? Map<String, dynamic>.from(supervisorData['targets'] as Map)
+    // Recipient entry (merged, history preserved).
+    final recipientRef = db.collection(recipientCollection).doc(recipientId);
+    final recipientSnap = await tx.get(recipientRef);
+    final recipientData =
+        Map<String, dynamic>.from(recipientSnap.data() ?? {});
+    final recipientTargets = (recipientData['targets'] is Map)
+        ? Map<String, dynamic>.from(recipientData['targets'] as Map)
         : <String, dynamic>{};
-    supervisorTargets[month] = buildSupervisorTargetEntry(
-      existingEntry: supervisorTargets[month],
+    recipientTargets[month] = buildRecipientTargetEntry(
+      existingEntry: recipientTargets[month],
       values: values,
       setByUid: setByUid,
+      setByRole: setByRole,
       now: now,
     );
 
-    // Manager entry: refresh distributed totals + audit.
+    // Holder entry: refresh distributed totals + audit.
     final newDistributed = sumAllocations([
       ...othersEntries,
       Map<String, dynamic>.from(normalizeTargets(proposed)),
     ]);
-    managerTargets[month] = applyDistributionToManager(
-      managerEntry: Map<String, dynamic>.from(managerEntry),
+    holderTargets[month] = applyDistributionToHolder(
+      holderEntry: Map<String, dynamic>.from(holderEntry),
       distributed: newDistributed,
       setByUid: setByUid,
-      supervisorId: supervisorId,
+      setByRole: setByRole,
+      recipientKey: recipientKey,
+      recipientId: recipientId,
       now: now,
     );
 
-    tx.update(supervisorRef, {'targets': supervisorTargets});
-    tx.update(managerRef, {'targets': managerTargets});
+    tx.update(recipientRef, {'targets': recipientTargets});
+    tx.update(holderRef, {'targets': holderTargets});
   });
 }
+
+/// Backwards-compatible wrapper: manager → supervisor distribution.
+Future<void> distributeSupervisorTarget({
+  required FirebaseFirestore db,
+  required String managerId,
+  required String supervisorId,
+  required List<String> allSupervisorIds,
+  required String month,
+  required Map<String, dynamic> values,
+  required String setByUid,
+  required DateTime now,
+}) =>
+    distributeAllocatedTarget(
+      db: db,
+      holderCollection: 'managers',
+      holderId: managerId,
+      recipientCollection: 'managers',
+      recipientId: supervisorId,
+      allRecipientIds: allSupervisorIds,
+      month: month,
+      values: values,
+      setByUid: setByUid,
+      setByRole: 'sales_manager',
+      recipientKey: 'supervisorId',
+      now: now,
+    );
+
+/// Supervisor → sales-rep distribution. The rep's share lives on the rep's
+/// own `salesRep` doc under the same month key, so the rep follow-up page
+/// (phase 3b) reads it with no rebuild.
+Future<void> distributeRepTarget({
+  required FirebaseFirestore db,
+  required String supervisorId,
+  required String repId,
+  required List<String> allRepIds,
+  required String month,
+  required Map<String, dynamic> values,
+  required String setByUid,
+  required DateTime now,
+}) =>
+    distributeAllocatedTarget(
+      db: db,
+      holderCollection: 'managers',
+      holderId: supervisorId,
+      recipientCollection: 'salesRep',
+      recipientId: repId,
+      allRecipientIds: allRepIds,
+      month: month,
+      values: values,
+      setByUid: setByUid,
+      setByRole: 'sales_supervisor',
+      recipientKey: 'repId',
+      now: now,
+    );

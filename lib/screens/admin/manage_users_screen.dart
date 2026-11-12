@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
 import 'manager_distribution_dialog.dart';
+import 'rep_distribution_dialog.dart';
 import 'performance_dashboard_screen.dart';
 import '../../utils/firestore_helpers.dart';
 import '../../utils/staff_display_name.dart';
@@ -102,14 +103,19 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
             ? [
                 Column(
                   children: [
-                    _buildManagerTargetHeader(),
+                    _buildManagerTargetHeader(sourceLabel: 'الإدارة'),
                     Expanded(child: _buildUserList('managers', 'managerId')),
                   ],
                 ),
                 _buildAllRepsForManager(),
               ]
             : [
-                _buildUserList('salesRep', 'supervisorId')
+                Column(
+                  children: [
+                    _buildManagerTargetHeader(sourceLabel: 'المدير'),
+                    Expanded(child: _buildUserList('salesRep', 'supervisorId')),
+                  ],
+                ),
               ],
       ),
     );
@@ -140,10 +146,10 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
     );
   }
 
-  /// بطاقة هدف المدير المستلم من الإدارة للشهر الحالي: المستلم والموزع
-  /// والمتبقي لكل مقياس. قراءة فقط؛ التوزيع يتم من بطاقات المشرفين.
-  /// الهدف المالي هنا للمبيعات فقط ولا يشمل مستهدف الراتب (targetAmount).
-  Widget _buildManagerTargetHeader() {
+  /// بطاقة الهدف المستلم للشهر الحالي: المستلم والموزع والمتبقي لكل
+  /// مقياس. قراءة فقط؛ التوزيع يتم من البطاقات. الهدف المالي هنا للمبيعات
+  /// فقط ولا يشمل مستهدف الراتب (targetAmount).
+  Widget _buildManagerTargetHeader({required String sourceLabel}) {
     final String myDocId = _userData?['docId'] ?? '';
     if (myDocId.isEmpty) return const SizedBox.shrink();
     final String month = targetMonthKey(DateTime.now());
@@ -183,7 +189,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                       color: kPrimaryColor, size: 20.sp),
                   SizedBox(width: 8.sp),
                   Expanded(
-                    child: Text("هدفك المستلم من الإدارة — $month",
+                    child: Text("هدفك المستلم من $sourceLabel — $month",
                         style: TextStyle(
                             fontSize: 14.sp,
                             fontWeight: FontWeight.bold,
@@ -260,6 +266,22 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
     );
   }
 
+  void _showRepDistributeDialog(String repId, Map<String, dynamic> repData) {
+    final String myDocId = _userData?['docId'] ?? '';
+    if (myDocId.isEmpty) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => RepDistributionDialog(
+        db: _db,
+        supervisorId: myDocId,
+        repId: repId,
+        repName: staffDisplayName(repData),
+        setByUid: myDocId,
+      ),
+    );
+  }
+
   Widget _handleStreamResult(AsyncSnapshot<QuerySnapshot> snapshot, String collectionName) {
     if (snapshot.hasError) return const Center(child: Text("حدث خطأ في جلب البيانات"));
     if (snapshot.connectionState == ConnectionState.waiting) {
@@ -291,16 +313,6 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
     String currentMonth = DateTime.now().toString().substring(0, 7);
     bool hasTarget = data['targets']?[currentMonth] != null;
     String targetType = (collection == 'managers') ? 'sales_supervisor' : 'sales';
-    
-    // شرط الصلاحية الجديد: 
-    // 1. المدير يحدد للمشرفين فقط (managers collection)
-    // 2. المشرف يحدد للمناديب فقط (salesRep collection)
-    bool canIEditTarget = false;
-    if (_userData?['role'] == 'sales_manager' && collection == 'managers') {
-      canIEditTarget = true;
-    } else if (_userData?['role'] == 'sales_supervisor' && collection == 'salesRep') {
-      canIEditTarget = true;
-    }
 
     return Card(
       elevation: 3,
@@ -361,9 +373,10 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                     ],
                   ),
                   
-                  // مسار المدير للمشرفين: توزيع هرمي من الهدف المستلم من الإدارة
-                  // (بدل نافذة الهدف المباشرة القديمة التي كانت تستبدل قيد الشهر
-                  // كاملاً). مسار المشرف للمناديب يبقى على النافذة القديمة كما هو.
+                  // التوزيع الهرمي من الهدف المستلم (نفس النمط المعتمد):
+                  // المدير يوزع على المشرفين، والمشرف يوزع على مناديبه
+                  // الثابتين. النافذة المباشرة القديمة (حقلان + قفل) أُزيلت
+                  // لأنها كانت تستبدل قيد الشهر كاملاً.
                   // دفاعياً: لا زر أهداف لمن ليس مؤهلاً لها حتى لو وصل للكارت.
                   if (_userData?['role'] == 'sales_manager' && collection == 'managers')
                     ElevatedButton.icon(
@@ -379,22 +392,21 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
                       icon: Icon(Icons.pie_chart_outline, size: 14.sp),
                       label: Text("توزيع الهدف", style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.bold)),
                     )
-                  else if (canIEditTarget &&
-                      (collection != 'salesRep' || isTargetEligible(data['repType'])))
+                  else if (_userData?['role'] == 'sales_supervisor' &&
+                      collection == 'salesRep' &&
+                      isTargetEligible(data['repType']))
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: hasTarget ? Colors.grey[200] : Colors.white,
-                        foregroundColor: hasTarget ? Colors.grey : kPrimaryColor,
-                        side: BorderSide(color: hasTarget ? Colors.grey : kPrimaryColor),
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.teal,
+                        side: const BorderSide(color: Colors.teal),
                         elevation: 0,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         padding: EdgeInsets.symmetric(horizontal: 10.sp, vertical: 5.sp),
                       ),
-                      onPressed: hasTarget
-                        ? () => _showLockedMessage() // لو فيه هدف، ممنوع التعديل
-                        : () => _showTargetModal(docId, staffDisplayName(data), collection),
-                      icon: Icon(hasTarget ? Icons.lock_outline : Icons.edit_calendar, size: 14.sp),
-                      label: Text(hasTarget ? "تم القفل" : "الأهداف", style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.bold)),
+                      onPressed: () => _showRepDistributeDialog(docId, data),
+                      icon: Icon(Icons.pie_chart_outline, size: 14.sp),
+                      label: Text("توزيع الهدف", style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.bold)),
                     ),
                 ],
               ),
@@ -424,75 +436,5 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> with SingleTicker
     );
   }
 
-  void _showLockedMessage() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("عفواً، لا يمكن تعديل الهدف بعد اعتماده للشهر الحالي."),
-        backgroundColor: Colors.redAccent,
-      ),
-    );
-  }
-
-  void _showTargetModal(String docId, String name, String collection) {
-    final TextEditingController financialCtrl = TextEditingController();
-    final TextEditingController visitsCtrl = TextEditingController();
-    
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        title: Text("تحديد هدف: $name", style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text("تحذير: لا يمكن تعديل الهدف بعد الحفظ خلال هذا الشهر.", 
-              style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold)),
-            SizedBox(height: 10.sp),
-            TextField(
-              controller: financialCtrl,
-              decoration: const InputDecoration(
-                labelText: "الهدف المالي المطلوب (جنيه)", 
-                prefixIcon: Icon(Icons.money),
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: TextInputType.number
-            ),
-            SizedBox(height: 15.sp),
-            TextField(
-              controller: visitsCtrl,
-              decoration: const InputDecoration(
-                labelText: "عدد الزيارات المستهدف", 
-                prefixIcon: Icon(Icons.location_on),
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: TextInputType.number
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text("إلغاء", style: TextStyle(fontSize: 13.sp))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: kPrimaryColor, padding: EdgeInsets.symmetric(horizontal: 20.sp)),
-            onPressed: () async {
-              if (financialCtrl.text.isEmpty || visitsCtrl.text.isEmpty) return;
-              
-              String month = DateTime.now().toString().substring(0, 7);
-              await _db.collection(collection).doc(docId).update({
-                'targets.$month': {
-                  'financialTarget': double.tryParse(financialCtrl.text) ?? 0,
-                  'visitsTarget': int.tryParse(visitsCtrl.text) ?? 0,
-                  'dateSet': FieldValue.serverTimestamp(),
-                  'locked': true, // إضافة علامة القفل
-                }
-              });
-              if (mounted) Navigator.pop(context);
-            },
-            child: Text("اعتماد الهدف", style: TextStyle(color: Colors.white, fontSize: 13.sp, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
 }
 

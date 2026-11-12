@@ -1,4 +1,5 @@
 import 'package:aksab_sales/utils/target_distribution.dart';
+import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // Phase-2 distribution math (pure, no Firestore): month keys, sums,
@@ -154,6 +155,123 @@ void main() {
         now: DateTime(2026, 11, 11),
       );
       expect(updated['status'], kTargetStatusFull);
+    });
+  });
+
+  group('distributeRepTarget (supervisor → rep)', () {
+    const month = '2026-11';
+
+    Future<FakeFirebaseFirestore> seed() async {
+      final fake = FakeFirebaseFirestore();
+      await fake.collection('managers').doc('s1').set({
+        'role': 'sales_supervisor',
+        'targets': {
+          month: {
+            'financialTarget': 5000,
+            'hoursTarget': 100,
+            'invoicesTarget': 50,
+            'clientsTarget': 20,
+            'visitsTarget': 30,
+            'setByUid': 'm1',
+            'history': [
+              {'note': 'set'}
+            ],
+          },
+        },
+      });
+      await fake.collection('salesRep').doc('p1').set({
+        'fullname': 'مندوب أول',
+        'repCode': 'R1',
+        'repType': 'permanent',
+        'supervisorId': 's1',
+      });
+      await fake.collection('salesRep').doc('p2').set({
+        'fullname': 'مندوب ثان',
+        'repCode': 'R2',
+        'repType': 'permanent',
+        'supervisorId': 's1',
+      });
+      return fake;
+    }
+
+    test('saves rep entry and updates holder totals + audit', () async {
+      final fake = await seed();
+      await distributeRepTarget(
+        db: fake,
+        supervisorId: 's1',
+        repId: 'p1',
+        allRepIds: const ['p1', 'p2'],
+        month: month,
+        values: {'financialTarget': 2000, 'visitsTarget': 10},
+        setByUid: 's1',
+        now: DateTime(2026, 11, 11),
+      );
+      final rep = await fake.collection('salesRep').doc('p1').get();
+      final entry = (rep.data()!['targets'] as Map)[month] as Map;
+      expect(entry['financialTarget'], 2000);
+      expect(entry['visitsTarget'], 10);
+      expect(entry['setByRole'], 'sales_supervisor');
+      expect((entry['history'] as List), hasLength(1));
+
+      final sup = await fake.collection('managers').doc('s1').get();
+      final sEntry = (sup.data()!['targets'] as Map)[month] as Map;
+      expect((sEntry['distributed'] as Map)['financialTarget'], 2000);
+      expect(sEntry['financialTarget'], 5000); // received untouched
+      final history = sEntry['history'] as List;
+      expect(history, hasLength(2));
+      expect((history.last as Map)['note'], 'distribute');
+      expect(
+          ((history.last as Map)['changes'] as Map)['repId'], 'p1');
+    });
+
+    test('overlapping second share fails inside the transaction', () async {
+      final fake = await seed();
+      await distributeRepTarget(
+        db: fake,
+        supervisorId: 's1',
+        repId: 'p1',
+        allRepIds: const ['p1', 'p2'],
+        month: month,
+        values: {'financialTarget': 3000},
+        setByUid: 's1',
+        now: DateTime(2026, 11, 11),
+      );
+      await expectLater(
+        distributeRepTarget(
+          db: fake,
+          supervisorId: 's1',
+          repId: 'p2',
+          allRepIds: const ['p1', 'p2'],
+          month: month,
+          values: {'financialTarget': 2500},
+          setByUid: 's1',
+          now: DateTime(2026, 11, 11),
+        ),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('merge preserves legacy keys on the rep doc', () async {
+      final fake = await seed();
+      await fake.collection('salesRep').doc('p1').update({
+        'targets': {
+          month: {'financialTarget': 300, 'visitsTarget': 5, 'locked': true},
+        },
+      });
+      await distributeRepTarget(
+        db: fake,
+        supervisorId: 's1',
+        repId: 'p1',
+        allRepIds: const ['p1', 'p2'],
+        month: month,
+        values: {'financialTarget': 500, 'visitsTarget': 8},
+        setByUid: 's1',
+        now: DateTime(2026, 11, 11),
+      );
+      final rep = await fake.collection('salesRep').doc('p1').get();
+      final entry = (rep.data()!['targets'] as Map)[month] as Map;
+      expect(entry['financialTarget'], 500);
+      expect(entry['locked'], isTrue);
     });
   });
 
