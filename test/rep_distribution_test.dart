@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:aksab_sales/screens/admin/manage_users_screen.dart';
+import 'package:aksab_sales/screens/admin/rep_distribution_dialog.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -257,4 +259,78 @@ void main() {
       expect(find.text('حفظ التوزيع'), findsNothing);
     });
   });
+
+  group('legacy docs and load failures never grey the dialog', () {
+    Future<void> pumpDialog(
+      WidgetTester tester,
+      FakeFirebaseFirestore fake, {
+      String repId = 'p1',
+    }) async {
+      await tester.pumpWidget(
+        Sizer(
+          builder: (context, orientation, deviceType) => MaterialApp(
+            home: Scaffold(
+              body: RepDistributionDialog(
+                db: fake,
+                supervisorId: 's1',
+                repId: repId,
+                repName: 'مندوب أول',
+                setByUid: 's1',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('legacy rep doc without repType still opens the dialog',
+        (tester) async {
+      final fake = await seed();
+      // مستند قديم مفتاحه رقم الهاتف ولا يحمل حقل repType.
+      await fake.collection('salesRep').doc('201021070461').set({
+        'fullname': 'مندوب قديم',
+        'repCode': 'R0',
+        'phone': '01021070461',
+        'supervisorId': 's1',
+      });
+      await pumpAs(tester, fake, {
+        'docId': 's1',
+        'role': 'sales_supervisor',
+        'fullname': 'مشرف',
+      });
+      await tester.ensureVisible(find.text('توزيع الهدف').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('توزيع الهدف').first);
+      await tester.pumpAndSettle();
+      expect(find.text('توزيع الهدف: مندوب أول'), findsOneWidget);
+      expect(find.byType(TextField), findsNWidgets(5));
+    });
+
+    testWidgets('load failure shows an error instead of a grey dialog',
+        (tester) async {
+      final fake = _ThrowingSalesRepFirestore();
+      final month = monthKey();
+      await fake.collection('managers').doc('s1').set({
+        'role': 'sales_supervisor',
+        'fullname': 'مشرف',
+        'managerId': 'm1',
+        'targets': {
+          month: {'financialTarget': 5000}
+        },
+      });
+      await pumpDialog(tester, fake);
+      expect(find.textContaining('تعذّر تحميل البيانات'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text('حفظ التوزيع'), findsNothing);
+    });
+  });
+}
+
+class _ThrowingSalesRepFirestore extends FakeFirebaseFirestore {
+  @override
+  CollectionReference<Map<String, dynamic>> collection(String path) {
+    if (path == 'salesRep') throw StateError('query failed');
+    return super.collection(path);
+  }
 }

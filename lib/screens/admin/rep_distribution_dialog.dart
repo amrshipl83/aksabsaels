@@ -37,6 +37,7 @@ class _RepDistributionDialogState extends State<RepDistributionDialog> {
   bool _loading = true;
   bool _hasHolderTarget = true;
   String? _error;
+  String? _loadError;
   String _month = '';
   Map<String, double> _received = {};
   Map<String, double> _othersSum = {};
@@ -89,8 +90,12 @@ class _RepDistributionDialogState extends State<RepDistributionDialog> {
           .where('supervisorId', isEqualTo: widget.supervisorId)
           .get();
       // Permanent reps only — freelance reps never enter the hierarchy.
-      final eligible =
-          repsSnap.docs.where((d) => isTargetEligible(d['repType'])).toList();
+      // Null-safe map access: legacy docs lack repType (operator [] would
+      // throw and grey the dialog); a missing type counts as permanent,
+      // matching the lists.
+      final eligible = repsSnap.docs
+          .where((d) => isTargetEligible(d.data()['repType']))
+          .toList();
       final others = <Map<String, dynamic>>[];
       Map<String, dynamic>? current;
       for (final doc in eligible) {
@@ -125,7 +130,7 @@ class _RepDistributionDialogState extends State<RepDistributionDialog> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = 'تعذّر تحميل البيانات: $e';
+          _loadError = 'تعذّر تحميل البيانات: $e';
         });
       }
     }
@@ -169,6 +174,22 @@ class _RepDistributionDialogState extends State<RepDistributionDialog> {
     if (mounted) Navigator.pop(context, true);
   }
 
+  /// Load-failure body: names the failure instead of greying the dialog.
+  /// Save errors keep their inline [_error] line inside the form, so a
+  /// failed save stays retryable without reopening.
+  Widget _loadErrorBody() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.error_outline, color: Colors.redAccent, size: 28),
+        const SizedBox(height: 8),
+        Text(_loadError ?? 'تعذّر تحميل البيانات.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -181,9 +202,11 @@ class _RepDistributionDialogState extends State<RepDistributionDialog> {
                 child: Padding(
                     padding: EdgeInsets.all(24),
                     child: CircularProgressIndicator()))
-            : !_hasHolderTarget
-                ? const Text('لا يوجد هدف مسند لهذا الشهر بعد.')
-                : Column(
+            : _loadError != null
+                ? _loadErrorBody()
+                : !_hasHolderTarget
+                    ? const Text('لا يوجد هدف مسند لهذا الشهر بعد.')
+                    : Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       for (final f in kTargetFields) ...[
@@ -192,7 +215,7 @@ class _RepDistributionDialogState extends State<RepDistributionDialog> {
                           decoration: InputDecoration(
                             labelText: kTargetLabelsAr[f],
                             helperText:
-                                'المتاح: ${_fmt(_received[f]! - _othersSum[f]!)}',
+                                'المتاح: ${_fmt((_received[f] ?? 0) - (_othersSum[f] ?? 0))}',
                             border: const OutlineInputBorder(),
                           ),
                           keyboardType:
@@ -216,7 +239,7 @@ class _RepDistributionDialogState extends State<RepDistributionDialog> {
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text('إلغاء', style: TextStyle(fontSize: 13.sp))),
-        if (!_loading && _hasHolderTarget)
+        if (!_loading && _hasHolderTarget && _loadError == null)
           ElevatedButton(
             style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.teal,
