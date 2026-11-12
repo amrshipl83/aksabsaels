@@ -261,7 +261,10 @@ class _LoginScreenState extends State<LoginScreen> {
         .get();
 
     if (salesRepQuery.docs.isNotEmpty) {
-      userDocSnapshot = salesRepQuery.docs.first;
+      final pickedId =
+          SessionService.pickIdentityDocId(salesRepQuery.docs, user.uid);
+      userDocSnapshot =
+          salesRepQuery.docs.firstWhere((d) => d.id == pickedId);
       userRole = 'sales_rep';
       matchedCollection = 'salesRep';
     }
@@ -273,7 +276,10 @@ class _LoginScreenState extends State<LoginScreen> {
           .limit(1)
           .get();
       if (managersQuery.docs.isNotEmpty) {
-        userDocSnapshot = managersQuery.docs.first;
+        final pickedId =
+            SessionService.pickIdentityDocId(managersQuery.docs, user.uid);
+        userDocSnapshot =
+            managersQuery.docs.firstWhere((d) => d.id == pickedId);
         userRole = userDocSnapshot.get('role')?.toString();
         matchedCollection = 'managers';
       }

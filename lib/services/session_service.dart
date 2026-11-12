@@ -25,6 +25,20 @@ class SessionService {
     return (docId == null || docId.isEmpty) ? null : docId;
   }
 
+  /// Picks the identity document id from a uid-matched query snapshot.
+  /// Prefers the uid-keyed document (doc id == uid) when both the legacy
+  /// phone-keyed doc and its migrated copy carry the same uid field;
+  /// otherwise keeps the single match. Returns '' for an empty list.
+  static String pickIdentityDocId(
+      Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+      String uid) {
+    if (docs.isEmpty) return '';
+    for (final d in docs) {
+      if (d.id == uid) return d.id;
+    }
+    return docs.first.id;
+  }
+
   /// Resolves the salesRep document id for [uid] with ownership verification.
   /// Never trusts a cached docId blindly: the cached doc must still exist
   /// and its `uid` field must equal [uid]. Otherwise falls back to a
@@ -51,7 +65,7 @@ class SessionService {
         .limit(1)
         .get();
     if (q.docs.isEmpty) return null;
-    return q.docs.first.id;
+    return pickIdentityDocId(q.docs, uid);
   }
 
   /// Validates that a Firebase user exists and the stored Firestore doc
