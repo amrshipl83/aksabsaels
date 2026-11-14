@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:sizer/sizer.dart';
 import '../../utils/firestore_helpers.dart';
+import '../../utils/rep_customer_count.dart';
 import '../../utils/target_distribution.dart';
 
 class PerformanceDashboardScreen extends StatefulWidget {
@@ -130,7 +131,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       final visitQueryCodes = visitSafeCodes.take(10).toList();
 
       double salesSum = 0;
-      Set<String> buyersSet = {};
+      int goalCustomers = 0;
       int orderCount = 0;
       double hours = 0;
       int visitCount = 0;
@@ -148,10 +149,28 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         for (var doc in orders.docs) {
           final total = (doc.data()['total'] ?? 0);
           salesSum += ((total is num) ? total.toDouble() : 0);
-          if (doc['buyer']?['id'] != null) buyersSet.add(doc['buyer']['id'].toString());
+          // Buyer ids are no longer collected: customers count via first-login below.
         }
         orderCount = orders.docs.length;
 
+        // العملاء: أول دخول ناجح (users/firstLoginAt بعد بدء الاحتساب) —
+        // كل UID مرة واحدة، والقدامى خارج الحساب. الفواتير/المالي/الساعات/
+        // الزيارات بلا أي تغيير في المنطق أو المصادر.
+        try {
+          final custSnap = await _db
+              .collection('users')
+              .where('repCode', whereIn: queryCodes)
+              .get();
+          final custById = <String, Map<String, dynamic>>{
+            for (final d in custSnap.docs) d.id: d.data(),
+          };
+          goalCustomers = countRepGoalCustomersForTeam(
+            docsById: custById,
+            repCodes: queryCodes.toSet(),
+          );
+        } catch (_) {
+          goalCustomers = 0;
+        }
         // 4. جلب ساعات العمل — الفريق فقط (أكواد المناديب). ساعات المشرف
         // الشخصية مستبعدة عمداً وستكون في صفحة الحضور لاحقاً.
         var logs = await _db
@@ -190,7 +209,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         setState(() {
           totalSales = salesSum;
           totalOrders = orderCount;
-          activeCustomers = buyersSet.length;
+          activeCustomers = goalCustomers;
           executedVisits = visitCount;
           workingHours = hours;
         });
@@ -568,10 +587,10 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       child: Text(
         isSupervisor
             ? 'طريقة العد: الفواتير تشمل جميع الحالات بما فيها الملغاة (دون تغيير في التعريف)؛ '
-                'العملاء مميزون بمعرف العميل الثابت؛ الزيارات تشمل المشرف (برمز زيارته إن وُجد) وفريقه؛ '
+                'العملاء بأول دخول ناجح بعد بدء الاحتساب (كل عميل مرة واحدة)؛ الزيارات تشمل المشرف (برمز زيارته إن وُجد) وفريقه؛ '
                 'الساعات للفريق فقط.'
             : 'طريقة العد: الفواتير تشمل جميع الحالات بما فيها الملغاة (دون تغيير في التعريف)؛ '
-                'العملاء مميزون بمعرف العميل الثابت.',
+                'العملاء بأول دخول ناجح بعد بدء الاحتساب (كل عميل مرة واحدة).',
         style: const TextStyle(fontSize: 11),
       ),
     );

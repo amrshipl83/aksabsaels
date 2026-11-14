@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
 import '../../utils/firestore_helpers.dart';
+import '../../utils/rep_customer_count.dart';
 import '../../utils/target_distribution.dart';
 
 class GoalsScreen extends StatefulWidget {
@@ -69,6 +70,9 @@ class _GoalsScreenState extends State<GoalsScreen> {
   List<Offset> _chartData = [];
   Map<String, dynamic>? _monthlyGoals;
   bool _accessDenied = false;
+  // First-login customers for clientsTarget (users/firstLoginAt). Every
+  // other achieved metric keeps its existing source untouched.
+  int _achievedClients = 0;
   String _monthKey = '';
   DateTime? _firstDay;
   DateTime? _lastDay;
@@ -141,6 +145,24 @@ class _GoalsScreenState extends State<GoalsScreen> {
           .toList();
         if (_chartData.isEmpty) _chartData = [Offset.zero];
 
+      // 4. عملاء الهدف: مستندات users لهذا المندوب ممن سجلوا أول دخول ناجح
+      // (firstLoginAt) بعد بدء الاحتساب — كل UID مرة واحدة، والقدامى خارج
+      // الحساب. أي فشل هنا يُبقي العدّاد صفرًا دون كسر بقية الشاشة.
+      int achievedClients = 0;
+      try {
+        final customersSnap = await FirebaseFirestore.instance
+            .collection('users')
+            .where('repCode', isEqualTo: repCode)
+            .get();
+        final docsById = <String, Map<String, dynamic>>{
+          for (final d in customersSnap.docs) d.id: d.data(),
+        };
+        achievedClients =
+            countRepGoalCustomers(
+                docsById: docsById, repCode: repCode?.toString() ?? '');
+      } catch (_) {
+        achievedClients = 0;
+      }
       // 3. جلب ساعات العمل من daily_logs
       final logsSnap = await FirebaseFirestore.instance
           .collection('daily_logs')
@@ -163,6 +185,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
         _stats['totalOrders'] = ordersSnap.docs.length;
         _stats['workingHours'] = hours;
         _stats['totalVisits'] = logsSnap.docs.length;
+        _achievedClients = achievedClients;
         _monthKey = monthKey;
         _firstDay = firstDay;
         _lastDay = DateTime(lastDay.year, lastDay.month, lastDay.day);
@@ -174,8 +197,9 @@ class _GoalsScreenState extends State<GoalsScreen> {
     }
   }
 
-  /// المحقق الحالي لكل حقل من نفس مصادر الشاشة — بلا أي مصدر جديد.
-  /// العملاء بلا عدّاد محقق في المصادر الحالية فيُعرض المستهدف فقط.
+  /// المحقق الحالي لكل حقل: المالي/الفواتير/الساعات/الزيارات من مصادرها
+  /// الحالية دون أي تغيير؛ العملاء من users/firstLoginAt (انظر أعلاه).
+  /// العملاء: عدّاد أول دخول ناجح (users/firstLoginAt بعد بدء الاحتساب).
   double? _achievedFor(String field) {
     switch (field) {
       case 'financialTarget':
@@ -186,6 +210,8 @@ class _GoalsScreenState extends State<GoalsScreen> {
         return (_stats['workingHours'] as num).toDouble();
       case 'visitsTarget':
         return (_stats['totalVisits'] as num).toDouble();
+      case 'clientsTarget':
+        return _achievedClients.toDouble();
       default:
         return null;
     }
