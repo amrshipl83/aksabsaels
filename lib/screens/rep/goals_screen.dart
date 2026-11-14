@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
 import '../../utils/firestore_helpers.dart';
+import '../../utils/target_distribution.dart';
 
 class GoalsScreen extends StatefulWidget {
   const GoalsScreen({super.key});
@@ -12,7 +13,51 @@ class GoalsScreen extends StatefulWidget {
   State<GoalsScreen> createState() => _GoalsScreenState();
 }
 
+/// قراءة هدف شهري واحد من خريطة `targets.<month>`.
+/// تستقبل نفس الشكل الذي يكتبه Backend (الحقول الخمسة القانونية) وتعيد
+/// 0 عند غياب الحقل — بلا أي حسابات أو قيم بديلة.
+double monthlyGoalValue(Map? monthlyGoals, String field) {
+  final raw = monthlyGoals?[field];
+  if (raw is num) return raw.toDouble();
+  return 0;
+}
+
+const List<String> _arabicMonths = <String>[
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+];
+
+const Map<String, String> _goalUnits = <String, String>{
+  'financialTarget': 'ج.م',
+  'hoursTarget': 'ساعة',
+  'invoicesTarget': 'فاتورة',
+  'clientsTarget': 'عميل',
+  'visitsTarget': 'زيارة',
+};
+
+const Map<String, IconData> _goalIcons = <String, IconData>{
+  'financialTarget': Icons.payments_outlined,
+  'hoursTarget': Icons.timer_outlined,
+  'invoicesTarget': Icons.description_outlined,
+  'clientsTarget': Icons.people_outlined,
+  'visitsTarget': Icons.location_on_outlined,
+};
+
+/// ترتيب البطاقات: المالي أولًا (مُبرز)، ثم البقية.
+const List<String> _goalOrder = <String>[
+  'financialTarget',
+  'invoicesTarget',
+  'hoursTarget',
+  'visitsTarget',
+  'clientsTarget',
+];
+
 class _GoalsScreenState extends State<GoalsScreen> {
+  static const Color _teal = Color(0xFF1ABC9C);
+  static const Color _tealDark = Color(0xFF0E7C66);
+  static const Color _ink = Color(0xFF2C3E50);
+  static const Color _page = Color(0xFFEEF2F5);
+
   bool _isLoading = true;
   Map<String, dynamic>? _userData;
   Map<String, dynamic> _stats = {
@@ -24,6 +69,9 @@ class _GoalsScreenState extends State<GoalsScreen> {
   List<Offset> _chartData = [];
   Map<String, dynamic>? _monthlyGoals;
   bool _accessDenied = false;
+  String _monthKey = '';
+  DateTime? _firstDay;
+  DateTime? _lastDay;
 
   @override
   void initState() {
@@ -115,6 +163,9 @@ class _GoalsScreenState extends State<GoalsScreen> {
         _stats['totalOrders'] = ordersSnap.docs.length;
         _stats['workingHours'] = hours;
         _stats['totalVisits'] = logsSnap.docs.length;
+        _monthKey = monthKey;
+        _firstDay = firstDay;
+        _lastDay = DateTime(lastDay.year, lastDay.month, lastDay.day);
         _isLoading = false;
       });
     } catch (e) {
@@ -123,114 +174,267 @@ class _GoalsScreenState extends State<GoalsScreen> {
     }
   }
 
+  /// المحقق الحالي لكل حقل من نفس مصادر الشاشة — بلا أي مصدر جديد.
+  /// العملاء بلا عدّاد محقق في المصادر الحالية فيُعرض المستهدف فقط.
+  double? _achievedFor(String field) {
+    switch (field) {
+      case 'financialTarget':
+        return (_stats['totalSales'] as num).toDouble();
+      case 'invoicesTarget':
+        return (_stats['totalOrders'] as num).toDouble();
+      case 'hoursTarget':
+        return (_stats['workingHours'] as num).toDouble();
+      case 'visitsTarget':
+        return (_stats['totalVisits'] as num).toDouble();
+      default:
+        return null;
+    }
+  }
+
+  String _fmtNum(double v) {
+    if (v == v.roundToDouble()) return v.toInt().toString();
+    if (v >= 100) return v.toStringAsFixed(0);
+    return v.toStringAsFixed(1);
+  }
+
+  String _monthTitle() {
+    final now = DateTime.now();
+    return 'أهداف شهر ${_arabicMonths[now.month - 1]} ${now.year}';
+  }
+
+  String _periodLine() {
+    if (_monthKey.isEmpty || _firstDay == null || _lastDay == null) {
+      return DateFormat('yyyy-MM').format(DateTime.now());
+    }
+    final fmt = DateFormat('d/M/yyyy');
+    return '$_monthKey • من ${fmt.format(_firstDay!)} إلى ${fmt.format(_lastDay!)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFEEF2F5),
+      backgroundColor: _page,
       appBar: AppBar(
-        title: const Text("أهداف الشهر الحالي", style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: const Color(0xFF1ABC9C),
+        title: const Text("أهداف الشهر الحالي",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+        backgroundColor: _teal,
         foregroundColor: Colors.white,
         centerTitle: true,
         elevation: 0,
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF1ABC9C)))
+          ? const Center(child: CircularProgressIndicator(color: _teal))
           : _accessDenied
               ? const Center(
                   child: Text("شاشة الأهداف متاحة للموظفين الثابتين (Permanent) فقط."))
-              : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildKpiCard(
-                    "إجمالي مبيعات الشهر",
-                    _stats['totalSales'],
-                    (_monthlyGoals?['financialTarget'] ?? 0).toDouble(),
-                    "ج.م",
-                    Icons.payments_outlined,
-                  ),
-                  _buildKpiCard(
-                    "عدد فواتير الشهر",
-                    _stats['totalOrders'].toDouble(),
-                    (_monthlyGoals?['invoiceTarget'] ?? 0).toDouble(),
-                    "فاتورة",
-                    Icons.description_outlined,
-                  ),
-                  const SizedBox(height: 10),
-                  const Text("  إحصائيات إضافية", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(child: _buildSmallStat("ساعات العمل", "${_stats['workingHours'].toStringAsFixed(1)} س", Icons.timer_outlined)),
-                      const SizedBox(width: 10),
-                      Expanded(child: _buildSmallStat("الزيارات", "${_stats['totalVisits']} زيارة", Icons.location_on_outlined)),
-                    ],
-                  ),
-                  const SizedBox(height: 25),
-                  const Text("  منحنى المبيعات اليومي", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
-                  const SizedBox(height: 15),
-                  _buildChartCard(),
-                ],
-              ),
-            ),
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final wide = constraints.maxWidth > 600;
+                    final rest = _goalOrder.where((f) => f != 'financialTarget').toList();
+                    return SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _buildPeriodCard(),
+                          const SizedBox(height: 12),
+                          _buildFinancialHero(),
+                          const SizedBox(height: 12),
+                          if (wide)
+                            GridView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                                mainAxisExtent: 190,
+                              ),
+                              itemCount: rest.length,
+                              itemBuilder: (ctx, i) => _buildGoalCard(rest[i]),
+                            )
+                          else
+                            ...rest.map((f) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: _buildGoalCard(f),
+                                )),
+                          const SizedBox(height: 12),
+                          const Text("منحنى المبيعات اليومي",
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 17,
+                                  color: _ink)),
+                          const SizedBox(height: 8),
+                          _buildChartCard(),
+                        ],
+                      ),
+                    );
+                  },
+                ),
     );
   }
 
-  Widget _buildKpiCard(String title, double actual, double goal, String unit, IconData icon) {
-    double percent = (goal > 0) ? (actual / goal) : 0.0;
+  Widget _buildPeriodCard() {
     return Container(
-      margin: const EdgeInsets.only(bottom: 15),
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)],
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10)],
       ),
-      child: Column(
+      child: Row(
         children: [
-          Row(
-            children: [
-              Icon(icon, color: const Color(0xFF1ABC9C), size: 28),
-              const SizedBox(width: 12),
-              Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-              const Spacer(),
-              Text("${actual.toStringAsFixed(0)} $unit", style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1ABC9C))),
-            ],
-          ),
-          const SizedBox(height: 15),
-          if (goal > 0) ...[
-            LinearProgressIndicator(
-              value: percent > 1.0 ? 1.0 : percent,
-              backgroundColor: Colors.grey[200],
-              color: percent >= 1.0 ? Colors.green : const Color(0xFF1ABC9C),
-              minHeight: 8,
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          const Icon(Icons.calendar_month_outlined, color: _teal, size: 30),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("الهدف: $goal", style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                Text("${(percent * 100).toStringAsFixed(0)}%", style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                Text(_monthTitle(),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 17, color: _ink)),
+                const SizedBox(height: 4),
+                Text(_periodLine(),
+                    style: const TextStyle(fontSize: 13, color: Color(0xFF5D6D7E))),
               ],
             ),
-          ]
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildSmallStat(String label, String value, IconData icon) {
+  Widget _buildFinancialHero() {
+    final goal = monthlyGoalValue(_monthlyGoals, 'financialTarget');
+    final actual = _achievedFor('financialTarget') ?? 0;
+    final percent = goal > 0 ? actual / goal : 0.0;
+    final pctText = '${(percent * 100).toStringAsFixed(percent >= 1 ? 0 : 1)}%';
     return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: _tealDark,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: _tealDark.withValues(alpha: 0.25), blurRadius: 14)],
+      ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: const Color(0xFF2C3E50), size: 20),
-          const SizedBox(height: 5),
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          const Row(
+            children: [
+              Icon(Icons.payments_outlined, color: Colors.white, size: 26),
+              SizedBox(width: 10),
+              Text('الهدف المالي للمبيعات',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 17)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text('${_fmtNum(actual)} ج.م',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 32)),
+          const SizedBox(height: 4),
+          Text(
+            goal > 0
+                ? 'المستهدف: ${_fmtNum(goal)} ج.م • الإنجاز: $pctText'
+                : 'لم يُسند هدف مالي لهذا الشهر بعد',
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+          if (goal > 0) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: percent > 1.0 ? 1.0 : percent,
+                backgroundColor: Colors.white24,
+                color: Colors.white,
+                minHeight: 10,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGoalCard(String field) {
+    final goal = monthlyGoalValue(_monthlyGoals, field);
+    final actual = _achievedFor(field);
+    final unit = _goalUnits[field] ?? '';
+    final label = kTargetLabelsAr[field] ?? field;
+    final percent = (goal > 0 && actual != null) ? actual / goal : 0.0;
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10)],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(_goalIcons[field], color: _teal, size: 24),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(label,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 15, color: _ink)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (actual != null)
+            Text('${_fmtNum(actual)} $unit',
+                style: const TextStyle(
+                    fontWeight: FontWeight.w800, fontSize: 26, color: _ink))
+          else
+            Text('${_fmtNum(goal)} $unit',
+                style: const TextStyle(
+                    fontWeight: FontWeight.w800, fontSize: 26, color: _ink)),
+          const SizedBox(height: 4),
+          if (goal > 0 && actual != null)
+            Text('المستهدف: ${_fmtNum(goal)} $unit',
+                style: const TextStyle(fontSize: 14, color: Color(0xFF5D6D7E)))
+          else if (goal <= 0)
+            const Text('لم يُسند هدف لهذا الشهر بعد',
+                style: TextStyle(fontSize: 13, color: Color(0xFFB7791F)))
+          else
+            Text('المستهدف: ${_fmtNum(goal)} $unit • $_monthKey',
+                style: const TextStyle(fontSize: 14, color: Color(0xFF5D6D7E))),
+          if (goal > 0 && actual != null) ...[
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: percent > 1.0 ? 1.0 : percent,
+                backgroundColor: const Color(0xFFE5E8EC),
+                color: percent >= 1.0 ? Colors.green : _teal,
+                minHeight: 9,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${(percent * 100).toStringAsFixed(percent >= 1 ? 0 : 1)}%',
+                style: const TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.bold, color: _ink),
+              ),
+            ),
+          ],
+          if (actual == null && goal > 0)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('لا يوجد عدّاد محقق مرتبط في المصادر الحالية',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF5D6D7E))),
+            ),
         ],
       ),
     );
@@ -240,7 +444,8 @@ class _GoalsScreenState extends State<GoalsScreen> {
     return Container(
       height: 250,
       padding: const EdgeInsets.fromLTRB(10, 20, 20, 10),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(14)),
       child: CustomPaint(
         painter: _SalesChartPainter(_chartData),
       ),
@@ -289,4 +494,3 @@ class _SalesChartPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _SalesChartPainter oldDelegate) => oldDelegate.data != data;
 }
-
