@@ -95,8 +95,10 @@ class WorkdayAutoCloseService {
   /// [taskBasisMs]: أساس هذه المهمة (يُقرأ من المستند عند غيابه).
   /// [nowOverride]: لحظة التنفيذ (المجدول الخارجي يمرر توقيت السيرفر).
   ///
-  /// آمن ضد التزامن: كل القراءات والكتابات داخل transaction واحدة،
-  /// والقرار يُبنى على أحدث البيانات لا على بيانات الجدولة.
+  /// آمن ضد التزامن: الاستعلامات (where) ممنوعة داخل transaction في
+  /// Firestore، لذلك تُقرأ الزيارات قبل فتحها، ثم تُطبق الكتابة داخل
+  /// transaction تعيد التحقق من بقاء اليوم مفتوحًا. القرار يُبنى على
+  /// أحدث البيانات لا على بيانات الجدولة.
   Future<WorkdayAutoCloseOutcome> enforceOnce({
     required String workdayId,
     int? taskBasisMs,
@@ -105,46 +107,50 @@ class WorkdayAutoCloseService {
     final now = nowOverride ?? DateTime.now();
     final dayRef = db.collection('daily_logs').doc(workdayId);
 
-    return db.runTransaction<WorkdayAutoCloseOutcome>((tx) async {
-      final daySnap = await tx.get(dayRef);
-      if (!daySnap.exists) return const WorkdayAutoCloseOutcome.noop();
-      final day = daySnap.data() ?? <String, dynamic>{};
+    // قراءة اليوم خارج الـ transaction (الاستعلامات التالية ممنوعة داخلها).
+    final dayPre = await dayRef.get();
+    if (!dayPre.exists) return const WorkdayAutoCloseOutcome.noop();
+    final pre = dayPre.data() ?? <String, dynamic>{};
 
-      // اليوم مغلق بالفعل: لا تعديل إطلاقًا (يحمي من التنفيذ المكرر).
-      if (day['status'] != 'open') {
-        return const WorkdayAutoCloseOutcome.noop(alreadyClosed: true);
-      }
+    // اليوم مغلق بالفعل: لا تعديل إطلاقًا (يحمي من التنفيذ المكرر).
+    if (pre['status'] != 'open') {
+      return const WorkdayAutoCloseOutcome.noop(alreadyClosed: true);
+    }
 
-      final repCode = (day['repCode'] ?? '').toString();
-      final startTs = day['startTime'];
-      if (repCode.isEmpty || startTs is! Timestamp) {
-        return const WorkdayAutoCloseOutcome.noop();
-      }
-      final dayStart = startTs.toDate();
-      final int basis = taskBasisMs ??
-          (day[WorkdayAutoCloseFields.basisMs] is int
-              ? day[WorkdayAutoCloseFields.basisMs] as int
-              : dayStart.millisecondsSinceEpoch);
+    final repCode = (pre['repCode'] ?? '').toString();
+    final startTs = pre['startTime'];
+    if (repCode.isEmpty || startTs is! Timestamp) {
+      return const WorkdayAutoCloseOutcome.noop();
+    }
+    final dayStart = startTs.toDate();
+    final int basis = taskBasisMs ??
+        (pre[WorkdayAutoCloseFields.basisMs] is int
+            ? pre[WorkdayAutoCloseFields.basisMs] as int
+            : dayStart.millisecondsSinceEpoch);
 
       // الزيارات المرتبطة: الجديدة عبر workdayId، والقديمة (قبل الميزة)
       // عبر repCode + حد زمني من بداية اليوم. زيارات يوم آخر (تحمل
       // workdayId مختلفًا) تُستبعد حتى لا تؤثر مهمة قديمة على يوم أحدث.
-      final linkedSnap = await tx.get(
-        db.collection('visits').where(
-              WorkdayAutoCloseFields.workdayId,
-              isEqualTo: workdayId,
-            ),
-      );
-      final legacySnap = await tx.get(
-        db.collection('visits').where('repCode', isEqualTo: repCode).where(
-              'startTime',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(dayStart),
-            ).where(
-              'startTime',
-              isLessThanOrEqualTo:
-                  Timestamp.fromDate(now.add(const Duration(minutes: 5))),
-            ),
-      );
+      final linkedSnap = await db
+          .collection('visits')
+          .where(
+            WorkdayAutoCloseFields.workdayId,
+            isEqualTo: workdayId,
+          )
+          .get();
+      final legacySnap = await db
+          .collection('visits')
+          .where('repCode', isEqualTo: repCode)
+          .where(
+            'startTime',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(dayStart),
+          )
+          .where(
+            'startTime',
+            isLessThanOrEqualTo:
+                Timestamp.fromDate(now.add(const Duration(minutes: 5))),
+          )
+          .get();
 
       final refs = <VisitStartRef>[];
       final seen = <String>{};
@@ -180,18 +186,35 @@ class WorkdayAutoCloseService {
         now: now,
       );
 
+      // مرجع المندوب للقراءة المشروطة داخل الـ transaction (بدل استعلام).
+      final repQuery = await db
+          .collection('salesRep')
+          .where('repCode', isEqualTo: repCode)
+          .limit(1)
+          .get();
+      final DocumentReference<Map<String, dynamic>>? repRef =
+          repQuery.docs.isNotEmpty ? repQuery.docs.first.reference : null;
+
       switch (decision.action) {
         case WorkdayAutoCloseAction.noop:
           return const WorkdayAutoCloseOutcome.noop();
 
         case WorkdayAutoCloseAction.reschedule:
-          tx.update(dayRef, {
-            WorkdayAutoCloseFields.nextCheckAt:
-                Timestamp.fromDate(decision.nextCheckAt!),
-            WorkdayAutoCloseFields.basisMs: decision.nextBasisMs!,
-            WorkdayAutoCloseFields.lastDecisionAt:
-                FieldValue.serverTimestamp(),
-            WorkdayAutoCloseFields.lastDecision: 'reschedule',
+          // كتابة الجدولة فقط إن بقي اليوم مفتوحًا لحظة الكتابة.
+          await db.runTransaction((tx) async {
+            final snap = await tx.get(dayRef);
+            if (!snap.exists) return;
+            if ((snap.data() ?? <String, dynamic>{})['status'] != 'open') {
+              return;
+            }
+            tx.update(dayRef, {
+              WorkdayAutoCloseFields.nextCheckAt:
+                  Timestamp.fromDate(decision.nextCheckAt!),
+              WorkdayAutoCloseFields.basisMs: decision.nextBasisMs!,
+              WorkdayAutoCloseFields.lastDecisionAt:
+                  FieldValue.serverTimestamp(),
+              WorkdayAutoCloseFields.lastDecision: 'reschedule',
+            });
           });
           return WorkdayAutoCloseOutcome(
             dayClosedNow: false,
@@ -202,58 +225,68 @@ class WorkdayAutoCloseService {
           );
 
         case WorkdayAutoCloseAction.closeWorkday:
-          _closeDayInTxn(tx, dayRef, decision.reason!);
-          return WorkdayAutoCloseOutcome(
-            dayClosedNow: true,
-            visitClosedNow: false,
-            rescheduled: false,
-            reason: decision.reason,
-            alreadyClosed: false,
-          );
+          return db.runTransaction<WorkdayAutoCloseOutcome>((tx) async {
+            final snap = await tx.get(dayRef);
+            if (!snap.exists) return const WorkdayAutoCloseOutcome.noop();
+            if ((snap.data() ?? <String, dynamic>{})['status'] != 'open') {
+              return const WorkdayAutoCloseOutcome.noop(alreadyClosed: true);
+            }
+            _closeDayInTxn(tx, dayRef, decision.reason!);
+            return WorkdayAutoCloseOutcome(
+              dayClosedNow: true,
+              visitClosedNow: false,
+              rescheduled: false,
+              reason: decision.reason,
+              alreadyClosed: false,
+            );
+          });
 
         case WorkdayAutoCloseAction.closeVisitAndWorkday:
-          final visitRef =
-              db.collection('visits').doc(decision.visitIdToClose!);
-          final visitSnap = await tx.get(visitRef);
-          var visitClosed = false;
-          // لا نلمس زيارة أُغلقت يدويًا في نفس اللحظة.
-          if (visitSnap.exists &&
-              (visitSnap.data()?['status'] == 'in_progress')) {
-            tx.update(visitRef, {
-              'status': WorkdayAutoCloseFields.visitAutoClosedStatus,
-              'endTime': FieldValue.serverTimestamp(),
-              'notes': 'إغلاق تلقائي لانتهاء ساعة دون زيارة جديدة',
-              WorkdayAutoCloseFields.autoClosed: true,
-              WorkdayAutoCloseFields.visitAutoClosedAt:
-                  FieldValue.serverTimestamp(),
-              WorkdayAutoCloseFields.visitAutoCloseReason: decision.reason!,
-            });
-            visitClosed = true;
-            // تصفير علامة الزيارة النشطة كما يفعل الإنهاء اليدوي.
-            final repSnap = await tx.get(
-              db
-                  .collection('salesRep')
-                  .where('repCode', isEqualTo: repCode)
-                  .limit(1),
-            );
-            if (repSnap.docs.isNotEmpty &&
-                repSnap.docs.first.data()['hasActiveVisit'] == true) {
-              tx.update(repSnap.docs.first.reference, {
-                'hasActiveVisit': false,
-              });
+          return db.runTransaction<WorkdayAutoCloseOutcome>((tx) async {
+            final snap = await tx.get(dayRef);
+            if (!snap.exists) return const WorkdayAutoCloseOutcome.noop();
+            if ((snap.data() ?? <String, dynamic>{})['status'] != 'open') {
+              return const WorkdayAutoCloseOutcome.noop(alreadyClosed: true);
             }
-          }
-          _closeDayInTxn(tx, dayRef, decision.reason!);
-          return WorkdayAutoCloseOutcome(
-            dayClosedNow: true,
-            visitClosedNow: visitClosed,
-            closedVisitId: visitClosed ? decision.visitIdToClose : null,
-            rescheduled: false,
-            reason: decision.reason,
-            alreadyClosed: false,
-          );
+            final visitRef =
+                db.collection('visits').doc(decision.visitIdToClose!);
+            final visitSnap = await tx.get(visitRef);
+            var visitClosed = false;
+            // لا نلمس زيارة أُغلقت يدويًا في نفس اللحظة.
+            if (visitSnap.exists &&
+                (visitSnap.data()?['status'] == 'in_progress')) {
+              tx.update(visitRef, {
+                'status': WorkdayAutoCloseFields.visitAutoClosedStatus,
+                'endTime': FieldValue.serverTimestamp(),
+                'notes': 'إغلاق تلقائي لانتهاء ساعة دون زيارة جديدة',
+                WorkdayAutoCloseFields.autoClosed: true,
+                WorkdayAutoCloseFields.visitAutoClosedAt:
+                    FieldValue.serverTimestamp(),
+                WorkdayAutoCloseFields.visitAutoCloseReason: decision.reason!,
+              });
+              visitClosed = true;
+              // تصفير علامة الزيارة النشطة كما يفعل الإنهاء اليدوي.
+              if (repRef != null) {
+                final repSnap = await tx.get(repRef);
+                if (repSnap.exists &&
+                    repSnap.data()?['hasActiveVisit'] == true) {
+                  tx.update(repRef, {
+                    'hasActiveVisit': false,
+                  });
+                }
+              }
+            }
+            _closeDayInTxn(tx, dayRef, decision.reason!);
+            return WorkdayAutoCloseOutcome(
+              dayClosedNow: true,
+              visitClosedNow: visitClosed,
+              closedVisitId: visitClosed ? decision.visitIdToClose : null,
+              rescheduled: false,
+              reason: decision.reason,
+              alreadyClosed: false,
+            );
+          });
       }
-    });
   }
 
   void _closeDayInTxn(
