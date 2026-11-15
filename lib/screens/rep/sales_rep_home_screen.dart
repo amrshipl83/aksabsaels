@@ -9,6 +9,8 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart'; 
 import 'dart:convert';
 import '../../utils/firestore_helpers.dart';
+import '../../services/workday_auto_close_service.dart';
+import '../../services/workday_auto_close_policy.dart';
 import 'sales_rep_dashboard.dart';
 import 'visit_screen.dart';
 import 'goals_screen.dart';
@@ -193,6 +195,10 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
       if (querySnapshot.docs.isNotEmpty) {
         final docData = querySnapshot.docs[0].data();
         currentDayLogId = querySnapshot.docs[0].id;
+        // تقييم فرصي للإغلاق التلقائي (ساعة دون زيارة جديدة).
+        // لا يحجب الواجهة، ولا يغير شيئًا إن لم تحن المهلة.
+        final autoClosed = await _enforceAutoCloseIfDue();
+        if (autoClosed) return;
         currentDayStartTime = (docData['startTime'] as Timestamp?)?.toDate();
         setState(() {
           _isDayOpen = true;
@@ -213,12 +219,43 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
     }
   }
 
+  // (الكتلة التالية توثّق _onWorkdayButton بالأسفل، لا الدالة المساعدة)
   // Workday button entry point. Opening a day additionally requests a
   // start-of-day briefing through the same Shira backend path; the reply is
   // kept as pending chat messages and the Shira frame highlights.
   // Serialized entry point: concurrent taps during permission/GPS gaps
   // collapse into one transition (no duplicate day docs, no duplicate
   // briefings). The briefing is bound to the opened day log id.
+  /// تقييم فرصي للإغلاق التلقائي عند كل فحص لحالة اليوم.
+  /// يعيد true إذا أُغلق اليوم الآن (فتتخطى الدعوة باقي منطق اليوم المفتوح).
+  /// آمن: أي خطأ يُتجاهل بصمت ويُترك اليوم مفتوحًا.
+  Future<bool> _enforceAutoCloseIfDue() async {
+    final logId = currentDayLogId;
+    if (logId == null) return false;
+    try {
+      final outcome = await WorkdayAutoCloseService(db: db).enforceOnce(
+        workdayId: logId,
+      );
+      if (!outcome.dayClosedNow || !mounted) return outcome.dayClosedNow;
+      setState(() {
+        _isDayOpen = false;
+        currentDayLogId = null;
+        currentDayStartTime = null;
+        _statusMessage = 'أُغلق يوم العمل تلقائيًا';
+      });
+      final claimed = await WorkdayAutoCloseService(
+        db: db,
+      ).claimNotice(workdayId: logId);
+      if (claimed && mounted) {
+        _showSnackBar(kWorkdayAutoCloseNotice);
+      }
+      return true;
+    } catch (e) {
+      debugPrint('Auto-close check skipped: $e');
+      return false;
+    }
+  }
+
   Future<void> _onWorkdayButton() async {
     if (_isDayTransitioning) return;
     _isDayTransitioning = true;
@@ -275,6 +312,7 @@ class _SalesRepHomeScreenState extends State<SalesRepHomeScreen> {
       await db.collection("daily_logs").doc(currentDayLogId).update({
         'endTime': FieldValue.serverTimestamp(),
         'status': "closed",
+        'closedBy': 'rep',
         'endLocation': {
           'lat': position.latitude,
           'lng': position.longitude,

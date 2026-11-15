@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sizer/sizer.dart';
 import 'dart:convert';
+import '../../services/workday_auto_close_service.dart';
 import 'add_new_customer.dart';
 
 class VisitScreen extends StatefulWidget {
@@ -223,6 +224,16 @@ class _VisitScreenState extends State<VisitScreen> {
     try {
       Position? position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
 
+      // ربط الزيارة بيوم العمل المفتوح ليتعرف عليها الإغلاق التلقائي.
+      final openDayQuery = await FirebaseFirestore.instance
+          .collection('daily_logs')
+          .where('repCode', isEqualTo: _userData!['repCode'])
+          .where('status', isEqualTo: 'open')
+          .limit(1)
+          .get();
+      final String? openDayId =
+          openDayQuery.docs.isNotEmpty ? openDayQuery.docs.first.id : null;
+
       final customer = _customers.firstWhere((doc) => doc.id == _selectedCustomerId);
       final customerName = customer['fullname'];
       final customerAddress = (customer.data() as Map<String, dynamic>)['address'] ?? "عنوان غير مسجل";
@@ -235,10 +246,15 @@ class _VisitScreenState extends State<VisitScreen> {
         'customerAddress': customerAddress,
         'startTime': FieldValue.serverTimestamp(),
         'status': "in_progress",
+
         'location': position != null ? {'lat': position.latitude, 'lng': position.longitude} : null,
       };
 
-      final docRef = await FirebaseFirestore.instance.collection('visits').add(visitData);
+      // الإنشاء داخل transaction تشترط اليوم مفتوحًا (تمنع زيارة يتيمة).
+      final visitId = await WorkdayAutoCloseService().createVisitAssertingOpenDay(
+        visitData: visitData,
+        workdayId: openDayId,
+      );
 
       final repQuery = await FirebaseFirestore.instance
           .collection('salesRep')
@@ -247,20 +263,34 @@ class _VisitScreenState extends State<VisitScreen> {
           .get();
       if (repQuery.docs.isNotEmpty) {
         await repQuery.docs.first.reference.update({'hasActiveVisit': true});
+
+        // تحديث موعد الفحص القادم ليبدأ العد من هذه الزيارة (أفضل جهد).
+        if (openDayId != null) {
+          try {
+            await WorkdayAutoCloseService()
+                .refreshScheduleMetadata(openDayId);
+          } catch (_) {}
+        }
       }
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('currentVisitId', docRef.id);
+      await prefs.setString('currentVisitId', visitId);
       await prefs.setString('currentCustomerName', customerName);
 
       setState(() {
-        _currentVisitId = docRef.id;
+        _currentVisitId = visitId;
         _currentCustomerName = customerName;
         _isVisiting = true;
         _isLoading = false;
       });
     } catch (e) {
       debugPrint("Start Visit Error: $e");
+      if (e is WorkdayClosedError && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('أُغلق يوم العمل — ابدأ يومًا جديدًا ثم سجّل الزيارة')),
+        );
+      }
       setState(() => _isLoading = false);
     }
   }
