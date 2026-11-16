@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:math';
 import 'package:aksab_sales/utils/phone_normalize.dart';
 
 // Rep-created buyer is server-owned: the app sends the profile + the rep's
@@ -33,6 +34,9 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
 
   bool _isLoading = false;
   Position? _currentPosition;
+  // مفتاح عدم التكرار لعملية التسجيل الجارية: يبقى عبر الانقطاع/المهلة،
+  // ويُمسح فقط عند نتيجة نهائية (انظر _registerCustomer).
+  String _requestId = '';
 
   @override
   void initState() {
@@ -91,6 +95,29 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
   /// form, so one number can never produce two different accounts.
   String? _normalizePhone(String raw) => normalizeEgyptianPhoneToLocal(raw);
 
+  /// ينشئ مفتاح العملية مرة واحدة ويعيد استخدامه عند إعادة المحاولة،
+  /// فيربط السيرفر المحاولات المتكررة بنفس التسجيل دون عميل مكرر.
+  String _ensureRequestId() {
+    if (_requestId.isEmpty) {
+      final r = Random.secure();
+      final bytes = List<int>.generate(16, (_) => r.nextInt(256));
+      _requestId = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    }
+    return _requestId;
+  }
+
+  String _duplicateMessage(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map &&
+          decoded['message'] is String &&
+          (decoded['message'] as String).contains('different data')) {
+        return '❌ هذه العملية استُخدمت ببيانات مختلفة. ابدأ تسجيلًا جديدًا.';
+      }
+    } catch (_) {}
+    return '❌ هذا الرقم مسجل بالفعل.';
+  }
+
   Future<void> _registerCustomer() async {
     // التأكد من ملء البيانات ووجود إحداثيات (اللقطة الجغرافية)
     if (!_formKey.currentState!.validate() || _currentPosition == null) {
@@ -123,6 +150,7 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
           'fullname': _nameController.text.trim(),
           'ownerName': _ownerNameController.text.trim(),
           'phoneNumber': cleanPhone,
+          'requestId': _ensureRequestId(),
           'address': _addressController.text.trim(),
           'country': 'egypt',
           'location': {
@@ -133,12 +161,22 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
       );
 
       if (response.statusCode == 200) {
+        _requestId = '';
         if (mounted) _showSuccessDialog();
         return;
       }
+      if (response.statusCode == 503 ||
+          (response.statusCode >= 500 && response.statusCode <= 599)) {
+        // خطأ عابر: نُبقي نفس المفتاح لتُعيد المحاولة نفس العملية دون تكرار.
+        if (mounted) {
+          _showSnackBar("❌ تعذر التسجيل مؤقتًا، أعد المحاولة بنفس العملية.");
+        }
+        return;
+      }
+      _requestId = '';
       if (mounted) {
         final msg = switch (response.statusCode) {
-          409 => "❌ هذا الرقم مسجل بالفعل.",
+          409 => _duplicateMessage(response.body),
           400 => "❌ بيانات غير صالحة. راجع الاسم ورقم الهاتف.",
           401 || 403 => "❌ الجلسة غير مخولة. أعد تسجيل الدخول.",
           _ => "❌ تعذر التسجيل حالياً (${response.statusCode}). حاول لاحقاً.",
