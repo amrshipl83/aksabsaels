@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:sizer/sizer.dart';
 import 'dart:convert';
 import '../../services/workday_auto_close_service.dart';
+import '../../services/visit_close_service.dart';
 import 'add_new_customer.dart';
 
 class VisitScreen extends StatefulWidget {
@@ -98,10 +99,56 @@ class _VisitScreenState extends State<VisitScreen> {
     _currentCustomerName = prefs.getString('currentCustomerName');
 
     if (_currentVisitId != null) {
-      setState(() {
-        _isVisiting = true;
-        _isLoading = false;
-      });
+      // لا نثق بالمعرف المحلي عميانيًا: قد تكون الزيارة أُغلقت من السيرفر
+      // (إغلاق تلقائي/علاجي) بينما ظل المعرف مخزنًا محليًا. الاستئناف فقط
+      // إذا أكد السيرفر وجود زيارة مفتوحة لهذا المندوب.
+      String? serverOpenId;
+      bool checkFailed = false;
+      try {
+        serverOpenId = await findOpenVisitId(
+          db: FirebaseFirestore.instance,
+          repCode: repCode,
+        );
+      } catch (_) {
+        checkFailed = true;
+      }
+      if (!mounted) return;
+      if (checkFailed) {
+        // تعذر التحقق (غالبًا انقطاع شبكة): لا نستأنف ولا نمسح —
+        // نحتفظ بالمعرف ونطلب إعادة فتح الشاشة عند توفر الاتصال.
+        // بدء زيارة جديدة في هذه الحالة يمر عبر حارس _startVisit الذي
+        // سيتبنى الزيارة المفتوحة بدل التكرار.
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تعذر التحقق من حالة الزيارة — تحقق من الاتصال ثم أعد فتح الشاشة.'),
+            duration: Duration(seconds: 5),
+          ),
+        );
+        _showLocationDisclosure(repCode);
+      } else if (serverOpenId != null) {
+        _currentVisitId = serverOpenId;
+        await prefs.setString('currentVisitId', serverOpenId);
+        setState(() {
+          _isVisiting = true;
+          _isLoading = false;
+        });
+      } else {
+        // لا زيارة مفتوحة على السيرفر: المعرف المحلي قديم — إسقاطه دون
+        // أي كتابة (الزيارة مغلقة مسبقًا أو حُذفت).
+        await prefs.remove('currentVisitId');
+        await prefs.remove('currentCustomerName');
+        _currentVisitId = null;
+        _currentCustomerName = null;
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('لا توجد زيارة مفتوحة على السيرفر — يمكنك بدء زيارة جديدة.'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+        _showLocationDisclosure(repCode);
+      }
     } else {
       _showLocationDisclosure(repCode);
     }
@@ -222,6 +269,56 @@ class _VisitScreenState extends State<VisitScreen> {
     if (_selectedCustomerId == null) return;
     setState(() => _isLoading = true);
     try {
+      // منع التكرار: إن وُجدت زيارة مفتوحة على السيرفر (ضغطة مكررة أو
+      // جلسة محلية قديمة) نتبناها بدل إنشاء زيارة مكررة بمستند جديد.
+      String? existingId;
+      try {
+        existingId = await findOpenVisitId(
+          db: FirebaseFirestore.instance,
+          repCode: _userData!['repCode'],
+        );
+      } catch (_) {
+        existingId = null;
+        if (mounted) {
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('تعذر التحقق من الزيارات المفتوحة — تحقق من الاتصال وحاول مجددًا دون إنشاء مكرر.'),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+      if (existingId != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('currentVisitId', existingId);
+        String adoptedName = 'عميل حالي';
+        try {
+          final adopted = await FirebaseFirestore.instance
+              .collection('visits')
+              .doc(existingId)
+              .get();
+          adoptedName =
+              adopted.data()?['customerName']?.toString() ?? adoptedName;
+          await prefs.setString('currentCustomerName', adoptedName);
+        } catch (_) {}
+        if (!mounted) return;
+        setState(() {
+          _currentVisitId = existingId;
+          _currentCustomerName = adoptedName;
+          _isVisiting = true;
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم العثور على زيارة مفتوحة — تم استئنافها بدل إنشاء مكررة.'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+        return;
+      }
+
       Position? position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
 
       // ربط الزيارة بيوم العمل المفتوح ليتعرف عليها الإغلاق التلقائي.
@@ -296,66 +393,139 @@ class _VisitScreenState extends State<VisitScreen> {
   }
 
   Future<void> _endVisit() async {
-  if (_visitStatus == null) return;
-  setState(() => _isLoading = true);
-  try {
-    // 1. الحصول على الموقع الحالي بدقة عند الإغلاق لضمان تسجيل آخر نقطة
-    Position? position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high);
+    if (_visitStatus == null || _currentVisitId == null) return;
+    if (!manualVisitCloseStatuses.contains(_visitStatus)) return;
+    final visitId = _currentVisitId!;
+    final closeStatus = _visitStatus!;
+    final notes = _notesController.text;
+    setState(() => _isLoading = true);
+    try {
+      // الموقع أفضل جهد مع مهلة: فشله سابقًا كان يعلّق الزر بلا أي رسالة
+      // وقبل إرسال أي كتابة. الإغلاق نفسه لا يتوقف على الموقع.
+      Position? position;
+      try {
+        position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        ).timeout(const Duration(seconds: 15));
+      } catch (_) {
+        position = null;
+      }
 
-    // 2. تحديث مستند الزيارة (كما هو)
-    await FirebaseFirestore.instance.collection('visits').doc(_currentVisitId).update({
-      'status': _visitStatus,
-      'notes': _notesController.text,
-      'endTime': FieldValue.serverTimestamp(),
-      'location': position != null ? {'lat': position.latitude, 'lng': position.longitude} : null,
-    });
+      // الإغلاق الموثوق: إعادة قراءة داخل Transaction والتحقق أنها
+      // `in_progress`، ثم كتابة الحالة النهائية و`endTime` والملاحظات معًا،
+      // ثم إعادة تحقق من الحالة النهائية قبل إعلان النجاح.
+      final result = await closeVisitReliably(
+        db: FirebaseFirestore.instance,
+        visitId: visitId,
+        status: closeStatus,
+        notes: notes,
+        location: position != null
+            ? {'lat': position.latitude, 'lng': position.longitude}
+            : null,
+      );
+      if (!mounted) return;
 
-    // 3. تحديث حقل الـ location في daily_logs لضمان ثبات الماركر في لوحة التحكم
-    final logQuery = await FirebaseFirestore.instance
-        .collection('daily_logs')
-        .where('repCode', isEqualTo: _userData!['repCode'])
-        .where('status', isEqualTo: 'open')
-        .limit(1)
-        .get();
+      if (result.outcome == VisitCloseOutcome.closed) {
+        // تحديثات لاحقة بأفضل جهد — لا تمس نجاح الإغلاق نفسه.
+        try {
+          final logQuery = await FirebaseFirestore.instance
+              .collection('daily_logs')
+              .where('repCode', isEqualTo: _userData!['repCode'])
+              .where('status', isEqualTo: 'open')
+              .limit(1)
+              .get();
+          if (logQuery.docs.isNotEmpty && position != null) {
+            await logQuery.docs.first.reference.update({
+              'location': {'lat': position.latitude, 'lng': position.longitude},
+              // لمتابعة وقت آخر تحديث
+              'lastUpdate': FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (_) {}
+        try {
+          final repQuery = await FirebaseFirestore.instance
+              .collection('salesRep')
+              .where('repCode', isEqualTo: _userData!['repCode'])
+              .limit(1)
+              .get();
+          if (repQuery.docs.isNotEmpty) {
+            await repQuery.docs.first.reference
+                .update({'hasActiveVisit': false});
+          }
+        } catch (_) {}
 
-    if (logQuery.docs.isNotEmpty && position != null) {
-      await logQuery.docs.first.reference.update({
-        'location': {'lat': position.latitude, 'lng': position.longitude},
-        'lastUpdate': FieldValue.serverTimestamp(), // لمتابعة وقت آخر تحديث
-      });
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('currentVisitId');
+        await prefs.remove('currentCustomerName');
+        if (!mounted) return;
+        setState(() {
+          _isVisiting = false;
+          _currentVisitId = null;
+          _currentCustomerName = null;
+          _visitStatus = null;
+          _notesController.clear();
+          _isLoading = false;
+        });
+        // التأكيد لا يظهر إلا بعد نجاح الحفظ والتحقق منه.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(visitCloseMessage(result)),
+            backgroundColor: const Color(0xFF43B97F),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        _loadCustomers(_userData!['repCode']);
+        return;
+      }
+
+      if (result.outcome == VisitCloseOutcome.alreadyClosed ||
+          result.outcome == VisitCloseOutcome.missing) {
+        // المعرف المحلي قديم (الزيارة أُغلقت من مصدر آخر) — إسقاطه دون
+        // أي كتابة: الخدمة لم تكتب شيئًا، فلا ملاحظات تُمحى ولا وقت يُستبدل.
+        // أي زيارة تالية تُنشأ بمستند جديد تمامًا عبر _startVisit.
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('currentVisitId');
+        await prefs.remove('currentCustomerName');
+        if (!mounted) return;
+        setState(() {
+          _isVisiting = false;
+          _currentVisitId = null;
+          _currentCustomerName = null;
+          _visitStatus = null;
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(visitCloseMessage(result)),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+        _loadCustomers(_userData!['repCode']);
+        return;
+      }
+
+      // فشل مؤقت: نحتفظ بكل شيء (المعرف المحلي + الحالة + الملاحظات)
+      // والضغطة التالية تعيد نفس العملية الآمنة دون تكرار.
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(visitCloseMessage(result)),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    } catch (_) {
+      // شبكة أمان أخيرة: لا نمسح شيئًا إطلاقًا.
+      debugPrint('End Visit Error');
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تعذر الإغلاق لخطأ غير متوقع — حالتك محفوظة، أعد المحاولة.'),
+          duration: Duration(seconds: 5),
+        ),
+      );
     }
-
-    // 4. تحديث علامة الزيارة في ملف المندوب (كما هو)
-    final repQuery = await FirebaseFirestore.instance
-        .collection('salesRep')
-        .where('repCode', isEqualTo: _userData!['repCode'])
-        .limit(1)
-        .get();
-    if (repQuery.docs.isNotEmpty) {
-      await repQuery.docs.first.reference.update({'hasActiveVisit': false});
-    }
-
-    // 5. مسح البيانات المحلية والعودة للحالة الطبيعية
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('currentVisitId');
-    await prefs.remove('currentCustomerName');
-
-    setState(() {
-      _isVisiting = false;
-      _currentVisitId = null;
-      _currentCustomerName = null;
-      _visitStatus = null;
-      _notesController.clear();
-      _isLoading = false;
-    });
-    
-    _loadCustomers(_userData!['repCode']);
-  } catch (e) {
-    debugPrint("End Visit Error: $e");
-    setState(() => _isLoading = false);
   }
-}
 
 
   void _showErrorPage(String msg) {
@@ -505,4 +675,3 @@ class _VisitScreenState extends State<VisitScreen> {
     );
   }
 }
-

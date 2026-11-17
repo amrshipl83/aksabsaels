@@ -145,21 +145,36 @@ class _GoalsScreenState extends State<GoalsScreen> {
           .toList();
         if (_chartData.isEmpty) _chartData = [Offset.zero];
 
-      // 4. عملاء الهدف: مستندات users لهذا المندوب ممن سجلوا أول دخول ناجح
+      // 4. عملاء الهدف: عدّاد المندوب الخادمي `clientCounts[الشهر].total`
+      // (يُزاد ذريًا مع ختم firstLoginAt في /mint). يُجمع عبر كل مستندات
+      // نفس repCode تحسبًا للتكرار. عند غياب العداد (شهور ما قبل النشر)
+      // نرجع للطريقة المباشرة: مستندات users ممن سجلوا أول دخول ناجح
       // (firstLoginAt) بعد بدء الاحتساب — كل UID مرة واحدة، والقدامى خارج
       // الحساب. أي فشل هنا يُبقي العدّاد صفرًا دون كسر بقية الشاشة.
       int achievedClients = 0;
       try {
-        final customersSnap = await FirebaseFirestore.instance
-            .collection('users')
+        final repsSnap = await FirebaseFirestore.instance
+            .collection('salesRep')
             .where('repCode', isEqualTo: repCode)
             .get();
-        final docsById = <String, Map<String, dynamic>>{
-          for (final d in customersSnap.docs) d.id: d.data(),
-        };
-        achievedClients =
-            countRepGoalCustomers(
-                docsById: docsById, repCode: repCode?.toString() ?? '');
+        final repDocs = <Map<String, dynamic>>[
+          for (final d in repsSnap.docs) d.data(),
+        ];
+        if (hasClientCountsMonth(repDocs: repDocs, monthKey: monthKey)) {
+          achievedClients =
+              sumClientCountsTotal(repDocs: repDocs, monthKey: monthKey);
+        } else {
+          final customersSnap = await FirebaseFirestore.instance
+              .collection('users')
+              .where('repCode', isEqualTo: repCode)
+              .get();
+          final docsById = <String, Map<String, dynamic>>{
+            for (final d in customersSnap.docs) d.id: d.data(),
+          };
+          achievedClients =
+              countRepGoalCustomers(
+                  docsById: docsById, repCode: repCode?.toString() ?? '');
+        }
       } catch (_) {
         achievedClients = 0;
       }
@@ -248,12 +263,14 @@ class _GoalsScreenState extends State<GoalsScreen> {
         centerTitle: true,
         elevation: 0,
       ),
+      // SafeArea يحمي المحتوى من شريط النظام وأزرار التنقل السفلية،
+      // خصوصًا آخر بطاقة في التمرير. لا يوجد bottomNavigationBar هنا.
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: _teal))
+          ? const SafeArea(child: Center(child: CircularProgressIndicator(color: _teal)))
           : _accessDenied
-              ? const Center(
-                  child: Text("شاشة الأهداف متاحة للموظفين الثابتين (Permanent) فقط."))
-              : LayoutBuilder(
+              ? const SafeArea(child: Center(
+                  child: Text("شاشة الأهداف متاحة للموظفين الثابتين (Permanent) فقط.")))
+              : SafeArea(child: LayoutBuilder(
                   builder: (context, constraints) {
                     final wide = constraints.maxWidth > 600;
                     final rest = _goalOrder.where((f) => f != 'financialTarget').toList();
@@ -297,7 +314,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
                       ),
                     );
                   },
-                ),
+                )),
     );
   }
 

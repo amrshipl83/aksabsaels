@@ -199,4 +199,51 @@ void main() {
       );
     });
   });
+
+  group('sumClientCountsTotal / hasClientCountsMonth', () {
+    test('sums total across duplicate repCode docs', () {
+      final docs = <Map<String, dynamic>>[
+        {
+          'repCode': 'R1',
+          'clientCounts': {
+            '2026-11': {'total': 3, 'days': {'2026-11-16': 3}},
+          },
+        },
+        {
+          'repCode': 'R1',
+          'clientCounts': {
+            '2026-11': {'total': 3, 'days': {'2026-11-16': 3}},
+          },
+        },
+      ];
+      expect(
+        sumClientCountsTotal(repDocs: docs, monthKey: '2026-11'),
+        6,
+      );
+      expect(
+        hasClientCountsMonth(repDocs: docs, monthKey: '2026-11'),
+        isTrue,
+      );
+    });
+
+    test('missing month or maps contribute 0 and flag absence', () {
+      final docs = <Map<String, dynamic>>[
+        {'repCode': 'R1'},
+        {'repCode': 'R1', 'clientCounts': {'2026-10': {'total': 9}}},
+        {'repCode': 'R1', 'clientCounts': {'2026-11': {'total': 'bad'}}},
+      ];
+      expect(
+        sumClientCountsTotal(repDocs: docs, monthKey: '2026-11'),
+        0,
+      );
+      expect(
+        hasClientCountsMonth(repDocs: docs, monthKey: '2026-11'),
+        isFalse,
+      );
+      expect(
+        hasClientCountsMonth(repDocs: docs, monthKey: '2026-10'),
+        isTrue,
+      );
+    });
+  });
 }

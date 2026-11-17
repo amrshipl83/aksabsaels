@@ -111,3 +111,43 @@ int countRepGoalCustomersForTeam({
   });
   return count;
 }
+
+/// Sums the server-side `clientCounts[monthKey].total` counter across every
+/// matching salesRep doc (robust to duplicate repCode docs: the backend
+/// increments all of them, so the sum is the authoritative total).
+/// Missing months, missing maps, and non-numeric totals contribute 0 —
+/// callers fall back to the live computation when no counter exists at all.
+int sumClientCountsTotal({
+  required List<Map<String, dynamic>> repDocs,
+  required String monthKey,
+}) {
+  var total = 0;
+  for (final doc in repDocs) {
+    final counts = doc['clientCounts'];
+    if (counts is Map) {
+      final month = counts[monthKey];
+      if (month is Map) {
+        final t = month['total'];
+        if (t is num) total += t.toInt();
+      }
+    }
+  }
+  return total;
+}
+
+/// True when at least one rep doc carries a usable numeric
+/// `clientCounts[monthKey].total` — i.e. the counter era has begun for
+/// this rep/month. A month entry without a numeric total does not count.
+bool hasClientCountsMonth({
+  required List<Map<String, dynamic>> repDocs,
+  required String monthKey,
+}) {
+  for (final doc in repDocs) {
+    final counts = doc['clientCounts'];
+    if (counts is Map) {
+      final month = counts[monthKey];
+      if (month is Map && month['total'] is num) return true;
+    }
+  }
+  return false;
+}
