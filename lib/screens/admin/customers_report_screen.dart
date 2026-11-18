@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'package:sizer/sizer.dart';
+import '../../utils/client_counts.dart';
 
 class CustomersReportScreen extends StatefulWidget {
   const CustomersReportScreen({super.key});
@@ -90,6 +91,16 @@ class _CustomersReportScreenState extends State<CustomersReportScreen> {
       body: Column(
         children: [
           _buildSearchBar(),
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(horizontal: 12.sp, vertical: 6.sp),
+            color: Colors.amber.shade50,
+            child: Text(
+              "سجل حسابات العملاء للبحث والمتابعة — وليس العدّاد المؤهل الشهري (يُعرض في شاشات الأداء).",
+              style: TextStyle(fontSize: 10.sp, color: Colors.grey[700]),
+              textAlign: TextAlign.center,
+            ),
+          ),
           Expanded(
             child: _targetRepCodes.isEmpty
                 ? _emptyState("لا يوجد مناديب تابعة لك لعرض عملائهم")
@@ -119,17 +130,19 @@ class _CustomersReportScreenState extends State<CustomersReportScreen> {
     );
   }
 
+  // سجل حسابات العملاء (دليل قابل للبحث) — وليس العدّاد المؤهل.
+  // العدّاد الموحد (`salesRep.clientCounts`) يُعرض في شاشات الأداء فقط.
+  // الاستعلام مقسّم على دفعات (10 لكل دفعة) فلا يُقتطع أي فريق كبير.
   Widget _buildCustomersStream() {
-    if (_targetRepCodes.length > 10) return _emptyState("عدد المناديب كبير. حدد نطاقاً أصغر لعرض العملاء.");
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .where('repCode', whereIn: _targetRepCodes)
-          .snapshots(),
+    return StreamBuilder<List>(
+      stream: watchUsersByRepCodes(
+        db: FirebaseFirestore.instance,
+        repCodes: _targetRepCodes,
+      ),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-        var docs = snapshot.data!.docs.where((d) {
+        var docs = snapshot.data!.where((d) {
           var name = (d['fullname'] ?? '').toString().toLowerCase();
           return name.contains(_searchQuery.toLowerCase());
         }).toList();

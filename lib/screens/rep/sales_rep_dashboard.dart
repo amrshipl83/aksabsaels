@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class SalesRepDashboard extends StatelessWidget {
+import '../../utils/client_counts.dart';
+import '../../utils/order_counts.dart';
+import '../../utils/visit_counts.dart';
+
+class SalesRepDashboard extends StatefulWidget {
   final String repCode;
   final DateTime currentDayStartTime;
   final VoidCallback onDataRefreshed;
@@ -14,111 +18,221 @@ class SalesRepDashboard extends StatelessWidget {
   });
 
   @override
+  State<SalesRepDashboard> createState() => _SalesRepDashboardState();
+}
+
+class _SalesRepDashboardState extends State<SalesRepDashboard> {
+  // Cairo keys fixed at open (same convention as the unified counter).
+  late final String _monthKey = clientCountMonthKey();
+  late final String _dayKey = clientCountDayKey();
+  late final Stream<int> _todayClients = watchRepDayTotal(
+    db: FirebaseFirestore.instance,
+    repCode: widget.repCode,
+    monthKey: _monthKey,
+    dayKey: _dayKey,
+  );
+  // Visits from the unified counter: today from `days`, month total
+  // from `total` — never recomputed from the `visits` collection.
+  late final Stream<int> _todayVisits = watchRepVisitDayTotal(
+    db: FirebaseFirestore.instance,
+    repCode: widget.repCode,
+    monthKey: _monthKey,
+    dayKey: _dayKey,
+  );
+  late final Stream<int> _monthVisits = watchRepVisitMonthTotal(
+    db: FirebaseFirestore.instance,
+    repCode: widget.repCode,
+    monthKey: _monthKey,
+  );
+  // Orders from the unified counter: today from `days`, month total
+  // from `total` — never recomputed from the `orders` collection.
+  // Detail screens keep their own order-document queries for line items.
+  late final Stream<OrderMonthSummary> _todayOrders =
+      watchRepOrderDaySummary(
+    db: FirebaseFirestore.instance,
+    repCode: widget.repCode,
+    monthKey: _monthKey,
+    dayKey: _dayKey,
+  );
+  late final Stream<OrderMonthSummary> _monthOrders =
+      watchRepOrderMonthSummary(
+    db: FirebaseFirestore.instance,
+    repCode: widget.repCode,
+    monthKey: _monthKey,
+  );
+
+  @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // صف يحتوي على بطاقتين (الزيارات والعملاء الجدد)
+        // صف يحتوي على بطاقتين (الزيارات والعملاء المؤهلين اليوم)
         Row(
           children: [
             Expanded(
-              child: _buildStatCard(
-                title: 'الزيارات',
-                collection: 'visits',
-                icon: Icons.location_on_outlined,
-                color: Colors.blue,
-              ),
+              child: _buildTodayVisitsCard(),
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: _buildStatCard(
-                title: 'عملاء جدد',
-                dateField: 'createdAt',
-                collection: 'users',
-                icon: Icons.person_add_alt_1_outlined,
-                color: Colors.orange,
-              ),
+              child: _buildTodayClientsCard(),
             ),
           ],
         ),
         const SizedBox(height: 10),
-        // بطاقة عريضة للطلبات
-        _buildStatCard(
-          title: 'طلبات اليوم',
-          repField: 'buyer.repCode',
-          dateField: 'orderDate',
-          collection: 'orders',
-          icon: Icons.shopping_cart_checkout_outlined,
-          color: Colors.green,
-          isWide: true,
-        ),
+        // بطاقة عريضة للطلبات من المجمّع الموحد (عدد المستندات، لا القيمة)
+        _buildTodayOrdersCard(),
       ],
     );
   }
 
-  Widget _buildStatCard({
-    required String title,
-    required String collection,
-    required IconData icon,
-    required Color color,
-    bool isWide = false,
-    String repField = 'repCode',
-    String dateField = 'startTime',
-  }) {
-    return StreamBuilder<QuerySnapshot>(
-      // جلب البيانات التي تخص المندوب وتمت بعد وقت بدء اليوم
-      stream: FirebaseFirestore.instance
-          .collection(collection)
-          .where(repField, isEqualTo: repCode)
-          .where(dateField,
-                 isGreaterThanOrEqualTo: Timestamp.fromDate(currentDayStartTime))
-          .snapshots(),
+  /// زيارات اليوم من العدّاد الموحد
+  /// (`salesRep.visitsByMonth.{Cairo month}.days.{Cairo day}`) — بث حي،
+  /// مع إجمالي الشهر من `total` كعنوان فرعي. ليست عدًّا من مجموعة `visits`.
+  Widget _buildTodayVisitsCard() {
+    const title = 'الزيارات';
+    const color = Colors.blue;
+    const icon = Icons.location_on_outlined;
+    return StreamBuilder<int>(
+      stream: _todayVisits,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
-            child: Text("$title: تعذر التحميل", style: const TextStyle(color: Colors.grey, fontSize: 13)),
+          return _buildCountCard(
+            title: title,
+            icon: icon,
+            color: color,
+            count: 'تعذر التحميل',
+            subtitle: 'بتوقيت القاهرة',
           );
         }
-        int count = 0;
-        if (snapshot.hasData) {
-          count = snapshot.data!.docs.length;
-        }
-
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(15),
-            border: Border(bottom: BorderSide(color: color, width: 4)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 5),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisAlignment: isWide ? MainAxisAlignment.spaceAround : MainAxisAlignment.center,
-            children: [
-              Icon(icon, color: color, size: 30),
-              const SizedBox(width: 15),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(color: Colors.grey, fontSize: 14)),
-                  Text(
-                    count.toString(),
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color),
-                  ),
-                ],
-              ),
-            ],
-          ),
+        final today = snapshot.data ?? 0;
+        return StreamBuilder<int>(
+          stream: _monthVisits,
+          builder: (context, monthSnapshot) {
+            final monthTotal = monthSnapshot.data ?? 0;
+            return _buildCountCard(
+              title: title,
+              icon: icon,
+              color: color,
+              count: '$today',
+              subtitle: 'الشهر: $monthTotal',
+            );
+          },
         );
       },
     );
   }
-}
 
+  /// العملاء المؤهلون اليوم من العدّاد الموحد
+  /// (`salesRep.clientCounts.{Cairo month}.days.{Cairo day}`) — بث حي.
+  /// هذا ليس إجمالي حسابات `users` ولا عدد المسجلين اليوم في السجل
+  /// (قائمة "عملائي" تعرض السجل، وليست العدّاد المؤهل).
+  Widget _buildTodayClientsCard() {
+    const title = 'عملاء مؤهلون اليوم';
+    const color = Colors.orange;
+    const icon = Icons.person_add_alt_1_outlined;
+    return StreamBuilder<int>(
+      stream: _todayClients,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _buildCountCard(
+            title: title,
+            icon: icon,
+            color: color,
+            count: 'تعذر التحميل',
+            subtitle: 'بتوقيت القاهرة',
+          );
+        }
+        return _buildCountCard(
+          title: title,
+          icon: icon,
+          color: color,
+          count: '${snapshot.data ?? 0}',
+          subtitle: 'بتوقيت القاهرة',
+        );
+      },
+    );
+  }
+
+  /// طلبات اليوم من المجمّع الموحد
+  /// (`salesRep.ordersByMonth.{Cairo month}.days.{Cairo day}.total`) — بث حي،
+  /// مع إجمالي الشهر من `total` كعنوان فرعي. عدد المستندات فقط، وليس القيمة.
+  /// ليست عدًّا من مجموعة `orders`.
+  Widget _buildTodayOrdersCard() {
+    const title = 'طلبات اليوم';
+    const color = Colors.green;
+    const icon = Icons.shopping_cart_checkout_outlined;
+    return StreamBuilder<OrderMonthSummary>(
+      stream: _todayOrders,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _buildCountCard(
+            title: title,
+            icon: icon,
+            color: color,
+            count: 'تعذر التحميل',
+            subtitle: 'بتوقيت القاهرة',
+            isWide: true,
+          );
+        }
+        final today = snapshot.data?.total ?? 0;
+        return StreamBuilder<OrderMonthSummary>(
+          stream: _monthOrders,
+          builder: (context, monthSnapshot) {
+            final monthTotal = monthSnapshot.data?.total ?? 0;
+            return _buildCountCard(
+              title: title,
+              icon: icon,
+              color: color,
+              count: '$today',
+              subtitle: 'الشهر: $monthTotal',
+              isWide: true,
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildCountCard({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required String count,
+    bool isWide = false,
+    String? subtitle,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        border: Border(bottom: BorderSide(color: color, width: 4)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: isWide ? MainAxisAlignment.spaceAround : MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: color, size: 30),
+          const SizedBox(width: 15),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(color: Colors.grey, fontSize: 14)),
+              Text(
+                count,
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color),
+              ),
+              if (subtitle != null)
+                Text(subtitle, style: const TextStyle(color: Colors.grey, fontSize: 11)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}

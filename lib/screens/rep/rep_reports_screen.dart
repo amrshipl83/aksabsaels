@@ -6,6 +6,9 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../../utils/client_counts.dart';
+import '../../utils/order_counts.dart';
+
 const Color kPrimaryColor = Color(0xFF43B97F);
 const Color kSecondaryColor = Color(0xFF1A2C3D);
 const Color kBgColor = Color(0xFFf0f2f5);
@@ -40,68 +43,60 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
     }
   }
 
+  // KPIs come ONLY from the unified `salesRep.ordersByMonth` aggregates
+  // (nested backend buckets: new/delivered/cancelled + delivered.value).
+  // No `orders` collection reads here; day/month/all all resolve from the
+  // single salesRep doc with Cairo keys. Raw order docs stay readable in
+  // the detail screens (my_orders, sales_orders_report).
   Future<void> _fetchOrders() async {
     setState(() => _isLoading = true);
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('orders')
-          .where('buyer.repCode', isEqualTo: repData!['repCode'])
-          .get();
+      final repCode = repData?['repCode']?.toString() ?? '';
+      final monthKey = clientCountMonthKey();
+      final dayKey = clientCountDayKey();
 
-      double tempTotal = 0;
-      Map<String, double> tempStatusSales = {};
-      Map<String, int> tempStatusCount = {};
-      
-      // نأخذ التاريخ الحالي بالتوقيت المحلي للجهاز
-      DateTime now = DateTime.now().toLocal();
-
-      for (var doc in snapshot.docs) {
-        var data = doc.data();
-        DateTime? orderDate;
-
-        // استخراج وتوحيد صيغة التاريخ بدقة إلى الـ Local Time
-        if (data['createdAt'] != null) {
-          if (data['createdAt'] is Timestamp) {
-            orderDate = (data['createdAt'] as Timestamp).toDate().toLocal();
-          } else if (data['createdAt'] is String) {
-            orderDate = DateTime.tryParse(data['createdAt'])?.toLocal();
-          } else if (data['createdAt'] is int) {
-            orderDate = DateTime.fromMillisecondsSinceEpoch(data['createdAt']).toLocal();
-          }
-        }
-
-        bool matchesFilter = true;
-        
-        if (_selectedFilter != 'all') {
-          if (orderDate != null) {
-            if (_selectedFilter == 'day') {
-              matchesFilter = orderDate.year == now.year &&
-                  orderDate.month == now.month &&
-                  orderDate.day == now.day;
-            } else if (_selectedFilter == 'month') {
-              matchesFilter = orderDate.year == now.year && 
-                  orderDate.month == now.month;
-            }
+      OrderMonthSummary summary = const OrderMonthSummary();
+      double periodSales = 0;
+      if (repCode.isNotEmpty) {
+        final snap = await FirebaseFirestore.instance
+            .collection('salesRep')
+            .where('repCode', isEqualTo: repCode)
+            .limit(1)
+            .get();
+        if (snap.docs.isNotEmpty) {
+          final data = snap.docs.first.data();
+          if (_selectedFilter == 'day') {
+            summary = repOrderDaySummary(data, monthKey, dayKey);
+            final daily = orderDailyDeliveredValues(data, monthKey);
+            final dayNum = int.tryParse(
+                dayKey.length >= 10 ? dayKey.substring(8, 10) : '');
+            periodSales = (dayNum == null) ? 0 : (daily[dayNum] ?? 0);
+          } else if (_selectedFilter == 'all') {
+            summary = sumAllTimeOrderSummary(data);
+            periodSales = summary.deliveredValue;
           } else {
-            matchesFilter = false;
+            summary = repOrderMonthSummary(data, monthKey);
+            periodSales = summary.deliveredValue;
           }
-        }
-
-        if (matchesFilter) {
-          double orderTotal = 0.0;
-          if (data['total'] != null) {
-            orderTotal = double.tryParse(data['total'].toString()) ?? 0.0;
-          }
-          
-          String status = data['status'] ?? 'جديد';
-          tempTotal += orderTotal;
-          tempStatusSales[status] = (tempStatusSales[status] ?? 0) + orderTotal;
-          tempStatusCount[status] = (tempStatusCount[status] ?? 0) + 1;
         }
       }
 
+      // Status breakdown mirrors the backend's three tracked buckets.
+      // Only `delivered` carries money; new/cancelled rows show 0.
+      final Map<String, double> tempStatusSales = {};
+      final Map<String, int> tempStatusCount = {};
+      void putBucket(String key, int count, double value) {
+        if (count <= 0) return;
+        tempStatusCount[key] = count;
+        tempStatusSales[key] = value;
+      }
+
+      putBucket('new', summary.fresh, 0);
+      putBucket('delivered', summary.delivered, periodSales);
+      putBucket('cancelled', summary.cancelled, 0);
+
       setState(() {
-        totalSales = tempTotal;
+        totalSales = periodSales;
         salesByStatus = tempStatusSales;
         ordersCountByStatus = tempStatusCount;
         _isLoading = false;
@@ -289,7 +284,9 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
   }
 
   Widget _buildStatusChartSection() {
-    final chartTotal = salesByStatus.values.fold<double>(0, (sum, value) => sum + value);
+    // Distribution over the three tracked buckets (counts, not money:
+    // only delivered carries a value in the backend).
+    final chartTotal = ordersCountByStatus.values.fold<int>(0, (sum, value) => sum + value);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -298,7 +295,7 @@ class _RepReportsScreenState extends State<RepReportsScreen> {
         children: [
           const Text('توزيع الحالات', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 20),
-          ...salesByStatus.entries.map((entry) {
+          ...ordersCountByStatus.entries.map((entry) {
             final percentage = chartTotal == 0 ? 0.0 : entry.value / chartTotal;
             return Padding(
               padding: const EdgeInsets.only(bottom: 12),

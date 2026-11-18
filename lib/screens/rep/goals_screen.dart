@@ -4,7 +4,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
 import '../../utils/firestore_helpers.dart';
-import '../../utils/rep_customer_count.dart';
+import '../../utils/client_counts.dart';
+import '../../utils/order_counts.dart';
+import '../../utils/visit_counts.dart';
 import '../../utils/target_distribution.dart';
 
 class GoalsScreen extends StatefulWidget {
@@ -65,14 +67,14 @@ class _GoalsScreenState extends State<GoalsScreen> {
     'totalSales': 0.0,
     'totalOrders': 0,
     'workingHours': 0.0,
-    'totalVisits': 0,
   };
   List<Offset> _chartData = [];
   Map<String, dynamic>? _monthlyGoals;
   bool _accessDenied = false;
-  // First-login customers for clientsTarget (users/firstLoginAt). Every
-  // other achieved metric keeps its existing source untouched.
-  int _achievedClients = 0;
+  // Qualified clients for clientsTarget: Single Source of Truth is the
+  // live `salesRep.clientCounts.{Cairo YYYY-MM}.total` counter (streamed
+  // below). Other achieved metrics keep their existing sources untouched.
+  String _repCodeForCounter = '';
   String _monthKey = '';
   DateTime? _firstDay;
   DateTime? _lastDay;
@@ -102,41 +104,27 @@ class _GoalsScreenState extends State<GoalsScreen> {
       }
       final repCode = _userData!['repCode'];
 
-      DateTime now = DateTime.now();
-      DateTime firstDay = DateTime(now.year, now.month, 1);
-      DateTime lastDay = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
-      String monthKey = DateFormat('yyyy-MM').format(now);
+      // Counter + targets month key: Cairo wall-clock (Single Source of
+      // Truth layer). Ranges below follow the same Cairo month.
+      final cairo = cairoNow();
+      DateTime firstDay = DateTime(cairo.year, cairo.month, 1);
+      DateTime lastDay = DateTime(cairo.year, cairo.month + 1, 0, 23, 59, 59);
+      String monthKey = clientCountMonthKey(nowUtc: cairo.toUtc());
 
-      // 1. جلب الأهداف من مجموعة salesRep
+      // 1. جلب الأهداف والمجمّع الشهري من مجموعة salesRep
+      // (المبيعات/الفواتير تُبثّ من المجمّع أدناه؛ الرسم البياني من
+      // `ordersByMonth.{month}.days` — قيمة المسلّم فقط — بلا قراءة `orders`).
       final repSnap = await FirebaseFirestore.instance
           .collection('salesRep')
           .where('repCode', isEqualTo: repCode)
           .get();
+      Map<int, double> dailySales = {};
       if (repSnap.docs.isNotEmpty) {
         var data = repSnap.docs.first.data();
         if (data['targets'] != null && data['targets'][monthKey] != null) {
           _monthlyGoals = data['targets'][monthKey];
         }
-      }
-
-      // 2. جلب الأوردرات وتحضير بيانات الرسم البياني
-      final ordersSnap = await FirebaseFirestore.instance
-          .collection('orders')
-          .where('buyer.repCode', isEqualTo: repCode)
-          .where('orderDate', isGreaterThanOrEqualTo: firstDay)
-          .where('orderDate', isLessThanOrEqualTo: lastDay)
-          .orderBy('orderDate')
-          .get();
-
-      double sales = 0;
-      Map<int, double> dailySales = {};
-      for (var doc in ordersSnap.docs) {
-        var data = doc.data();
-        double total = (data['total'] ?? 0).toDouble();
-        sales += total;
-        
-        DateTime date = (data['orderDate'] as Timestamp).toDate();
-        dailySales[date.day] = (dailySales[date.day] ?? 0) + total;
+        dailySales = orderDailyDeliveredValues(data, monthKey);
       }
 
       // تحويل البيانات لنقاط على الرسم البياني
@@ -145,39 +133,11 @@ class _GoalsScreenState extends State<GoalsScreen> {
           .toList();
         if (_chartData.isEmpty) _chartData = [Offset.zero];
 
-      // 4. عملاء الهدف: عدّاد المندوب الخادمي `clientCounts[الشهر].total`
-      // (يُزاد ذريًا مع ختم firstLoginAt في /mint). يُجمع عبر كل مستندات
-      // نفس repCode تحسبًا للتكرار. عند غياب العداد (شهور ما قبل النشر)
-      // نرجع للطريقة المباشرة: مستندات users ممن سجلوا أول دخول ناجح
-      // (firstLoginAt) بعد بدء الاحتساب — كل UID مرة واحدة، والقدامى خارج
-      // الحساب. أي فشل هنا يُبقي العدّاد صفرًا دون كسر بقية الشاشة.
-      int achievedClients = 0;
-      try {
-        final repsSnap = await FirebaseFirestore.instance
-            .collection('salesRep')
-            .where('repCode', isEqualTo: repCode)
-            .get();
-        final repDocs = <Map<String, dynamic>>[
-          for (final d in repsSnap.docs) d.data(),
-        ];
-        if (hasClientCountsMonth(repDocs: repDocs, monthKey: monthKey)) {
-          achievedClients =
-              sumClientCountsTotal(repDocs: repDocs, monthKey: monthKey);
-        } else {
-          final customersSnap = await FirebaseFirestore.instance
-              .collection('users')
-              .where('repCode', isEqualTo: repCode)
-              .get();
-          final docsById = <String, Map<String, dynamic>>{
-            for (final d in customersSnap.docs) d.id: d.data(),
-          };
-          achievedClients =
-              countRepGoalCustomers(
-                  docsById: docsById, repCode: repCode?.toString() ?? '');
-        }
-      } catch (_) {
-        achievedClients = 0;
-      }
+      // 4. عملاء الهدف: يُعرضون من العدّاد الموحد
+      // `salesRep.clientCounts.{Cairo YYYY-MM}.total` عبر بث حي
+      // (watchRepMonthTotal) — بلا إعادة حساب من `users` وبلا fallback.
+      // يُخزّن repCode ومفتاح الشهر هنا ويُبث الرقم في البطاقة أدناه.
+      final repCodeForCounter = repCode?.toString() ?? '';
       // 3. جلب ساعات العمل من daily_logs
       final logsSnap = await FirebaseFirestore.instance
           .collection('daily_logs')
@@ -196,11 +156,12 @@ class _GoalsScreenState extends State<GoalsScreen> {
       }
 
       setState(() {
-        _stats['totalSales'] = sales;
-        _stats['totalOrders'] = ordersSnap.docs.length;
+        // المالي/الفواتير يُبثّان من المجمّع الموحد أدناه (عدد المستندات
+        // وقيمة المسلّم فقط) — بلا قراءة `orders` هنا.
         _stats['workingHours'] = hours;
-        _stats['totalVisits'] = logsSnap.docs.length;
-        _achievedClients = achievedClients;
+        // Visits are NOT counted from daily_logs here: the visitsTarget
+        // card below streams `salesRep.visitsByMonth.{Cairo month}.total`.
+        _repCodeForCounter = repCodeForCounter;
         _monthKey = monthKey;
         _firstDay = firstDay;
         _lastDay = DateTime(lastDay.year, lastDay.month, lastDay.day);
@@ -212,21 +173,19 @@ class _GoalsScreenState extends State<GoalsScreen> {
     }
   }
 
-  /// المحقق الحالي لكل حقل: المالي/الفواتير/الساعات/الزيارات من مصادرها
-  /// الحالية دون أي تغيير؛ العملاء من users/firstLoginAt (انظر أعلاه).
-  /// العملاء: عدّاد أول دخول ناجح (users/firstLoginAt بعد بدء الاحتساب).
+  /// المحقق الحالي لكل حقل: الساعات من `daily_logs` فقط.
+  /// المالي (قيمة المسلّم) والفواتير (عدد المستندات) والزيارات والعملاء
+  /// تُبثّ من المجمّعات الموحدة في بطاقات مستقلة أدناه، لذا تُعيد
+  /// هذه الدالة null لها هنا.
   double? _achievedFor(String field) {
     switch (field) {
-      case 'financialTarget':
-        return (_stats['totalSales'] as num).toDouble();
-      case 'invoicesTarget':
-        return (_stats['totalOrders'] as num).toDouble();
       case 'hoursTarget':
         return (_stats['workingHours'] as num).toDouble();
+      case 'financialTarget':
+      case 'invoicesTarget':
       case 'visitsTarget':
-        return (_stats['totalVisits'] as num).toDouble();
       case 'clientsTarget':
-        return _achievedClients.toDouble();
+        return null;
       default:
         return null;
     }
@@ -239,13 +198,13 @@ class _GoalsScreenState extends State<GoalsScreen> {
   }
 
   String _monthTitle() {
-    final now = DateTime.now();
+    final now = cairoNow();
     return 'أهداف شهر ${_arabicMonths[now.month - 1]} ${now.year}';
   }
 
   String _periodLine() {
     if (_monthKey.isEmpty || _firstDay == null || _lastDay == null) {
-      return DateFormat('yyyy-MM').format(DateTime.now());
+      return clientCountMonthKey();
     }
     final fmt = DateFormat('d/M/yyyy');
     return '$_monthKey • من ${fmt.format(_firstDay!)} إلى ${fmt.format(_lastDay!)}';
@@ -295,12 +254,12 @@ class _GoalsScreenState extends State<GoalsScreen> {
                                 mainAxisExtent: 190,
                               ),
                               itemCount: rest.length,
-                              itemBuilder: (ctx, i) => _buildGoalCard(rest[i]),
+                              itemBuilder: (ctx, i) => _goalCardFor(rest[i]),
                             )
                           else
                             ...rest.map((f) => Padding(
                                   padding: const EdgeInsets.only(bottom: 12),
-                                  child: _buildGoalCard(f),
+                                  child: _goalCardFor(f),
                                 )),
                           const SizedBox(height: 12),
                           const Text("منحنى المبيعات اليومي",
@@ -348,9 +307,26 @@ class _GoalsScreenState extends State<GoalsScreen> {
     );
   }
 
+  /// البطل المالي من المجمّع الموحد (قيمة المسلّم فقط، بث حي).
   Widget _buildFinancialHero() {
     final goal = monthlyGoalValue(_monthlyGoals, 'financialTarget');
-    final actual = _achievedFor('financialTarget') ?? 0;
+    if (_repCodeForCounter.isEmpty || _monthKey.isEmpty) {
+      return _buildFinancialHeroCard(goal, 0);
+    }
+    return StreamBuilder<OrderMonthSummary>(
+      stream: watchRepOrderMonthSummary(
+        db: FirebaseFirestore.instance,
+        repCode: _repCodeForCounter,
+        monthKey: _monthKey,
+      ),
+      builder: (context, snapshot) {
+        final actual = snapshot.data?.deliveredValue ?? 0;
+        return _buildFinancialHeroCard(goal, actual);
+      },
+    );
+  }
+
+  Widget _buildFinancialHeroCard(double goal, double actual) {
     final percent = goal > 0 ? actual / goal : 0.0;
     final pctText = '${(percent * 100).toStringAsFixed(percent >= 1 ? 0 : 1)}%';
     return Container(
@@ -404,9 +380,111 @@ class _GoalsScreenState extends State<GoalsScreen> {
     );
   }
 
-  Widget _buildGoalCard(String field) {
+  /// بطاقة هدف واحدة. المالي (قيمة المسلّم) والفواتير (عدد المستندات)
+  /// والزيارات والعملاء يُمرَّر محققها من المجمّعات الموحدة الحيّة عبر
+  /// [actualOverride]؛ الساعات فقط من `_achievedFor`.
+  Widget _goalCardFor(String field) {
+    if (field == 'clientsTarget') return _buildClientsCounterCard();
+    if (field == 'visitsTarget') return _buildVisitsCounterCard();
+    if (field == 'financialTarget') return _buildFinancialCounterCard();
+    if (field == 'invoicesTarget') return _buildInvoicesCounterCard();
+    return _buildGoalCard(field);
+  }
+
+  /// بطاقة الفواتير من المجمّع الموحد (عدد المستندات، بث حي).
+  Widget _buildInvoicesCounterCard() {
+    const field = 'invoicesTarget';
+    if (_repCodeForCounter.isEmpty || _monthKey.isEmpty) {
+      return _buildGoalCard(field, actualOverride: 0);
+    }
+    return StreamBuilder<OrderMonthSummary>(
+      stream: watchRepOrderMonthSummary(
+        db: FirebaseFirestore.instance,
+        repCode: _repCodeForCounter,
+        monthKey: _monthKey,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _buildGoalCard(field, actualOverride: 0);
+        }
+        final actual = (snapshot.data?.total ?? 0).toDouble();
+        return _buildGoalCard(field, actualOverride: actual);
+      },
+    );
+  }
+
+  /// بطاقة المبيعات المصغّرة من المجمّع الموحد (قيمة المسلّم فقط، بث حي).
+  Widget _buildFinancialCounterCard() {
+    const field = 'financialTarget';
+    if (_repCodeForCounter.isEmpty || _monthKey.isEmpty) {
+      return _buildGoalCard(field, actualOverride: 0);
+    }
+    return StreamBuilder<OrderMonthSummary>(
+      stream: watchRepOrderMonthSummary(
+        db: FirebaseFirestore.instance,
+        repCode: _repCodeForCounter,
+        monthKey: _monthKey,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _buildGoalCard(field, actualOverride: 0);
+        }
+        return _buildGoalCard(field,
+            actualOverride: snapshot.data?.deliveredValue ?? 0);
+      },
+    );
+  }
+
+  /// بطاقة الزيارات من العدّاد الموحد (بث حي، Cairo month key).
+  /// الإجمالي من `visitsByMonth.{month}.total` — بلا عدّ من `visits`
+  /// أو `daily_logs` وبلا fallback.
+  Widget _buildVisitsCounterCard() {
+    const field = 'visitsTarget';
+    if (_repCodeForCounter.isEmpty || _monthKey.isEmpty) {
+      return _buildGoalCard(field, actualOverride: 0);
+    }
+    return StreamBuilder<int>(
+      stream: watchRepVisitMonthTotal(
+        db: FirebaseFirestore.instance,
+        repCode: _repCodeForCounter,
+        monthKey: _monthKey,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _buildGoalCard(field, actualOverride: 0);
+        }
+        final actual = (snapshot.data ?? 0).toDouble();
+        return _buildGoalCard(field, actualOverride: actual);
+      },
+    );
+  }
+
+  /// بطاقة العملاء المؤهلين من العدّاد الموحد (بث حي، Cairo month key).
+  /// غياب العداد = صفر، بلا إعادة حساب من `users` وبلا fallback.
+  Widget _buildClientsCounterCard() {
+    const field = 'clientsTarget';
+    if (_repCodeForCounter.isEmpty || _monthKey.isEmpty) {
+      return _buildGoalCard(field, actualOverride: 0);
+    }
+    return StreamBuilder<int>(
+      stream: watchRepMonthTotal(
+        db: FirebaseFirestore.instance,
+        repCode: _repCodeForCounter,
+        monthKey: _monthKey,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _buildGoalCard(field, actualOverride: 0);
+        }
+        final actual = (snapshot.data ?? 0).toDouble();
+        return _buildGoalCard(field, actualOverride: actual);
+      },
+    );
+  }
+
+  Widget _buildGoalCard(String field, {double? actualOverride}) {
     final goal = monthlyGoalValue(_monthlyGoals, field);
-    final actual = _achievedFor(field);
+    final actual = actualOverride ?? _achievedFor(field);
     final unit = _goalUnits[field] ?? '';
     final label = kTargetLabelsAr[field] ?? field;
     final percent = (goal > 0 && actual != null) ? actual / goal : 0.0;

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:sizer/sizer.dart';
+import '../../utils/client_counts.dart';
+import '../../utils/order_counts.dart';
+import '../../utils/visit_counts.dart';
 import '../../utils/firestore_helpers.dart';
-import '../../utils/rep_customer_count.dart';
 import '../../utils/target_distribution.dart';
 
 class PerformanceDashboardScreen extends StatefulWidget {
@@ -26,20 +28,15 @@ class PerformanceDashboardScreen extends StatefulWidget {
 }
 
 class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen> {
-  DateTime _startDate = DateTime(DateTime.now().year, DateTime.now().month, 1);
-  DateTime _endDate = DateTime.now();
+  DateTime _startDate = DateTime(cairoNow().year, cairoNow().month, 1);
   bool _isLoading = true;
 
-  double totalSales = 0;
-  int totalOrders = 0;
-  int activeCustomers = 0;
   double workingHours = 0;
-  int executedVisits = 0;
   Map<String, dynamic> targets = {};
   bool _repOutsideScope = false;
   // Monthly follow-up state (supervisor branch only).
-  int _selYear = DateTime.now().year;
-  int _selMonth = DateTime.now().month;
+  int _selYear = cairoNow().year;
+  int _selMonth = cairoNow().month;
   int _repCount = 0;
 
   static const List<String> _arabicMonths = <String>[
@@ -65,7 +62,6 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     // Follow-up is month-based for both roles now: bound the range to the
     // whole selected month.
     _startDate = DateTime(_selYear, _selMonth, 1);
-    _endDate = DateTime(_selYear, _selMonth + 1, 0);
     _fetchData();
   }
 
@@ -74,11 +70,10 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     setState(() => _isLoading = true);
 
     try {
+      // Visit totals are NOT read here: the visits card below streams the
+      // unified `salesRep.visitsByMonth.{Cairo month}.total` counter live
+      // (team sum for supervisors, single rep for rep view).
       List<String> codesToQuery = [];
-      // Visit codes: team repCodes plus the supervisor's own repCode when
-      // their doc carries one (same key visits use). Orders, customers and
-      // hours always use codesToQuery (team-only).
-      List<String> visitCodes = [];
 
       // 1. تحديد الـ repCodes المستهدفة
       if (widget.targetType == 'sales_supervisor') {
@@ -100,117 +95,51 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         final supData = supervisorDoc.data();
         targets = supData?['targets'] ?? {};
         _repCount = codesToQuery.where((e) => e.trim().isNotEmpty).length;
-        visitCodes = [...codesToQuery];
-        // The supervisor's own visits join the team visits ONLY, when their
-        // doc carries a repCode (the same key visits use). Orders, customers
-        // and hours stay team-only; supervisor personal hours are excluded
-        // and will live in the future attendance page.
-        final supCode = supData?['repCode']?.toString().trim() ?? '';
-        if (supCode.isNotEmpty && !visitCodes.contains(supCode)) {
-          visitCodes.add(supCode);
-        }
       } else {
         codesToQuery = [widget.repCode ?? ''];
-        visitCodes = [...codesToQuery];
         var repDoc = await _db.collection('salesRep').doc(widget.targetDocId).get();
         final repData = repDoc.data();
         targets = repData?['targets'] ?? {};
         _repOutsideScope = !isTargetEligible(repData?['repType']);
       }
 
+      // الطلبات/المبيعات تُبثّ من المجمّع الموحد
+      // (`salesRep.ordersByMonth.{month}`) في بطاقتين مستقلتين أدناه —
+      // بلا استعلام `orders` هنا وبلا إعادة حساب. العملاء المؤهلون
+      // والزيارات كذلك من عدّاديهما الموحدين.
       final safeCodes = codesToQuery.where((e) => e.trim().isNotEmpty).toList();
-      if (safeCodes.length > 10) {
-        debugPrint("Performance: too many repCodes (${safeCodes.length}), showing first 10 only");
-      }
-      final queryCodes = safeCodes.take(10).toList();
-      final visitSafeCodes =
-          visitCodes.where((e) => e.trim().isNotEmpty).toList();
-      if (visitSafeCodes.length > 10) {
-        debugPrint("Performance: too many visit repCodes (${visitSafeCodes.length}), showing first 10 only");
-      }
-      final visitQueryCodes = visitSafeCodes.take(10).toList();
 
-      double salesSum = 0;
-      int goalCustomers = 0;
-      int orderCount = 0;
       double hours = 0;
-      int visitCount = 0;
 
-      if (queryCodes.isNotEmpty) {
-        // 2. جلب الأوردرات — كل الحالات بما فيها الملغاة (نفس سلوك العرض
-        // الحالي؛ إخراج الملغاة يغيّر أرقام الإنجاز لذا يُوثَّق ولا يُغيَّر).
-        var orders = await _db
-            .collection('orders')
-            .where('buyer.repCode', whereIn: queryCodes)
-            .where('orderDate', isGreaterThanOrEqualTo: Timestamp.fromDate(_startDate))
-            .where('orderDate', isLessThanOrEqualTo: Timestamp.fromDate(_endDate.add(const Duration(days: 1))))
-            .get();
-
-        for (var doc in orders.docs) {
-          final total = (doc.data()['total'] ?? 0);
-          salesSum += ((total is num) ? total.toDouble() : 0);
-          // Buyer ids are no longer collected: customers count via first-login below.
-        }
-        orderCount = orders.docs.length;
-
-        // العملاء: أول دخول ناجح (users/firstLoginAt بعد بدء الاحتساب) —
-        // كل UID مرة واحدة، والقدامى خارج الحساب. الفواتير/المالي/الساعات/
-        // الزيارات بلا أي تغيير في المنطق أو المصادر.
-        try {
-          final custSnap = await _db
-              .collection('users')
-              .where('repCode', whereIn: queryCodes)
-              .get();
-          final custById = <String, Map<String, dynamic>>{
-            for (final d in custSnap.docs) d.id: d.data(),
-          };
-          goalCustomers = countRepGoalCustomersForTeam(
-            docsById: custById,
-            repCodes: queryCodes.toSet(),
-          );
-        } catch (_) {
-          goalCustomers = 0;
-        }
-        // 4. جلب ساعات العمل — الفريق فقط (أكواد المناديب). ساعات المشرف
+      if (safeCodes.isNotEmpty) {
+        // جلب ساعات العمل — الفريق فقط (أكواد المناديب). ساعات المشرف
         // الشخصية مستبعدة عمداً وستكون في صفحة الحضور لاحقاً.
-        var logs = await _db
-            .collection('daily_logs')
-            .where('repCode', whereIn: queryCodes)
-            .where('startTime', isGreaterThanOrEqualTo: Timestamp.fromDate(_startDate))
-            .get();
+        // مقسّم على دفعات (10 لكل استعلام) بلا اقتطاع.
+        for (final chunk in chunkList(safeCodes, 10)) {
+          var logs = await _db
+              .collection('daily_logs')
+              .where('repCode', whereIn: chunk)
+              .where('startTime',
+                  isGreaterThanOrEqualTo: Timestamp.fromDate(_startDate))
+              .get();
 
-        for (var log in logs.docs) {
-          var data = log.data();
-          try {
-            if (data['startTime'] != null && data['endTime'] != null) {
-              DateTime start = (data['startTime'] as Timestamp).toDate();
-              DateTime end = (data['endTime'] as Timestamp).toDate();
-              if (!end.isBefore(start)) {
-                hours += end.difference(start).inMinutes / 60;
+          for (var log in logs.docs) {
+            var data = log.data();
+            try {
+              if (data['startTime'] != null && data['endTime'] != null) {
+                DateTime start = (data['startTime'] as Timestamp).toDate();
+                DateTime end = (data['endTime'] as Timestamp).toDate();
+                if (!end.isBefore(start)) {
+                  hours += end.difference(start).inMinutes / 60;
+                }
               }
-            }
-          } catch (_) {}
+            } catch (_) {}
+          }
         }
-      }
-
-      // 3. جلب الزيارات (الحقل الفعلي startTime وليس timestamp) — الفريق
-      // زائد المشرف نفسه (برمز زيارته إن وُجد في مستنده).
-      if (visitQueryCodes.isNotEmpty) {
-        var visits = await _db
-            .collection('visits')
-            .where('repCode', whereIn: visitQueryCodes)
-            .where('startTime', isGreaterThanOrEqualTo: Timestamp.fromDate(_startDate))
-            .where('startTime', isLessThanOrEqualTo: Timestamp.fromDate(_endDate.add(const Duration(days: 1))))
-            .get();
-        visitCount = visits.docs.length;
       }
 
       if (mounted) {
         setState(() {
-          totalSales = salesSum;
-          totalOrders = orderCount;
-          activeCustomers = goalCustomers;
-          executedVisits = visitCount;
           workingHours = hours;
         });
       }
@@ -242,18 +171,22 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         foregroundColor: const Color(0xFF2F3542),
         centerTitle: true,
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF1ABC9C)))
-          : RefreshIndicator(
-              onRefresh: _fetchData,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: EdgeInsets.all(15.sp),
-                child: _buildFollowUpBody(
-                    isSupervisor:
-                        widget.targetType == 'sales_supervisor'),
+      // SafeArea أعلى وأسفل: لا bottomNavigationBar هنا، والتمرير
+      // يبقى طبيعيًا داخل SingleChildScrollView.
+      body: SafeArea(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: Color(0xFF1ABC9C)))
+            : RefreshIndicator(
+                onRefresh: _fetchData,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: EdgeInsets.all(15.sp),
+                  child: _buildFollowUpBody(
+                      isSupervisor:
+                          widget.targetType == 'sales_supervisor'),
+                ),
               ),
-            ),
+      ),
     );
   }
 
@@ -264,7 +197,6 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       _selYear = year;
       _selMonth = month;
       _startDate = DateTime(year, month, 1);
-      _endDate = DateTime(year, month + 1, 0);
     });
     _fetchData();
   }
@@ -284,7 +216,7 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     final entry = targets[_monthKey];
     final values = normalizeTargets(entry is Map ? entry : null);
     final prog =
-        monthProgress(now: DateTime.now(), year: _selYear, month: _selMonth);
+        monthProgress(now: cairoNow(), year: _selYear, month: _selMonth);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -322,32 +254,21 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
               ? 'ساعات الفريق فقط — لا تشمل ساعات المشرف الشخصية.'
               : 'ساعات عملك الشخصية — مرتبطة بالراتب الأساسي.',
         ),
-        _supKpiCard(
-          title: 'الفواتير / الأوردرات',
-          actual: totalOrders.toDouble(),
+        _buildOrdersCounterCard(
+          isSupervisor: isSupervisor,
           goal: values['invoicesTarget']!,
-          unit: 'فاتورة',
         ),
-        _supKpiCard(
-          title: 'العملاء',
-          actual: activeCustomers.toDouble(),
+        _buildClientsCounterCard(
+          isSupervisor: isSupervisor,
           goal: values['clientsTarget']!,
-          unit: 'عميل',
         ),
-        _supKpiCard(
-          title: 'الزيارات',
-          actual: executedVisits.toDouble(),
+        _buildVisitsCounterCard(
+          isSupervisor: isSupervisor,
           goal: values['visitsTarget']!,
-          unit: 'زيارة',
-          note: isSupervisor
-              ? 'زياراتك وزيارات فريقك (تُحسب زيارتك برمز زيارتك إن وُجد).'
-              : 'زياراتك المسجلة خلال الشهر.',
         ),
-        _supKpiCard(
-          title: 'الهدف المالي',
-          actual: totalSales,
+        _buildSalesCounterCard(
+          isSupervisor: isSupervisor,
           goal: values['financialTarget']!,
-          unit: 'ج.م',
         ),
         _buildCountingNote(isSupervisor: isSupervisor),
       ],
@@ -471,6 +392,144 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     );
   }
 
+  /// بطاقة العملاء المؤهلين من العدّاد الموحد (بث حي، Cairo month key).
+  /// مشرف: مجموع عدّادات الفريق عبر `supervisorId` (مرة واحدة لكل
+  /// مندوب، مقسّم على دفعات بلا اقتطاع). مندوب: عدّاد `repCode` وحده.
+  /// غياب العداد = صفر، بلا إعادة حساب من `users`.
+  Widget _buildClientsCounterCard({
+    required bool isSupervisor,
+    required double goal,
+  }) {
+    final stream = isSupervisor
+        ? watchSupervisorMonthTotal(
+            db: _db,
+            supervisorDocId: widget.targetDocId,
+            monthKey: _monthKey,
+          )
+        : watchRepMonthTotal(
+            db: _db,
+            repCode: widget.repCode ?? '',
+            monthKey: _monthKey,
+          );
+    return StreamBuilder<int>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final actual = (snapshot.data ?? 0).toDouble();
+        return _supKpiCard(
+          title: 'العملاء المؤهلون',
+          actual: actual,
+          goal: goal,
+          unit: 'عميل',
+          note: 'العدّاد الموحد الحي (بتوقيت القاهرة) — بلا إعادة حساب.',
+        );
+      },
+    );
+  }
+
+  /// بطاقة الزيارات من العدّاد الموحد (بث حي، Cairo month key).
+  /// مشرف: مجموع عدّادات الفريق عبر `supervisorId` (مرة واحدة لكل
+  /// مندوب، مقسّم على دفعات بلا اقتطاع). مندوب: عدّاد `repCode` وحده.
+  /// غياب العداد = صفر، بلا عدّ من مجموعة `visits`.
+  Widget _buildVisitsCounterCard({
+    required bool isSupervisor,
+    required double goal,
+  }) {
+    final stream = isSupervisor
+        ? watchSupervisorVisitMonthTotal(
+            db: _db,
+            supervisorDocId: widget.targetDocId,
+            monthKey: _monthKey,
+          )
+        : watchRepVisitMonthTotal(
+            db: _db,
+            repCode: widget.repCode ?? '',
+            monthKey: _monthKey,
+          );
+    return StreamBuilder<int>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final actual = (snapshot.data ?? 0).toDouble();
+        return _supKpiCard(
+          title: 'الزيارات',
+          actual: actual,
+          goal: goal,
+          unit: 'زيارة',
+          note: isSupervisor
+              ? 'إجمالي الفريق من العدّاد الموحد الحي (بتوقيت القاهرة) — بلا إعادة حساب.'
+              : 'زياراتك من العدّاد الموحد الحي (بتوقيت القاهرة) — بلا إعادة حساب.',
+        );
+      },
+    );
+  }
+
+  /// بطاقة الفواتير من المجمّع الموحد (عدد المستندات، بث حي).
+  /// مشرف: مجموع عدّادات الفريق (مرة واحدة لكل مندوب). مندوب: عدّاده وحده.
+  /// غياب العداد = صفر، بلا عدّ من مجموعة `orders`.
+  Widget _buildOrdersCounterCard({
+    required bool isSupervisor,
+    required double goal,
+  }) {
+    final stream = isSupervisor
+        ? watchSupervisorOrderMonthSummary(
+            db: _db,
+            supervisorDocId: widget.targetDocId,
+            monthKey: _monthKey,
+          )
+        : watchRepOrderMonthSummary(
+            db: _db,
+            repCode: widget.repCode ?? '',
+            monthKey: _monthKey,
+          );
+    return StreamBuilder<OrderMonthSummary>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final actual = (snapshot.data?.total ?? 0).toDouble();
+        return _supKpiCard(
+          title: 'الفواتير / الأوردرات',
+          actual: actual,
+          goal: goal,
+          unit: 'فاتورة',
+          note: isSupervisor
+              ? 'إجمالي الفريق من المجمّع الموحد (عدد المستندات) — بلا إعادة حساب.'
+              : 'طلباتك من المجمّع الموحد (عدد المستندات) — بلا إعادة حساب.',
+        );
+      },
+    );
+  }
+
+  /// بطاقة المبيعات من المجمّع الموحد (قيمة المسلّم فقط، بث حي).
+  Widget _buildSalesCounterCard({
+    required bool isSupervisor,
+    required double goal,
+  }) {
+    final stream = isSupervisor
+        ? watchSupervisorOrderMonthSummary(
+            db: _db,
+            supervisorDocId: widget.targetDocId,
+            monthKey: _monthKey,
+          )
+        : watchRepOrderMonthSummary(
+            db: _db,
+            repCode: widget.repCode ?? '',
+            monthKey: _monthKey,
+          );
+    return StreamBuilder<OrderMonthSummary>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final actual = snapshot.data?.deliveredValue ?? 0;
+        return _supKpiCard(
+          title: 'الهدف المالي',
+          actual: actual,
+          goal: goal,
+          unit: 'ج.م',
+          note: isSupervisor
+              ? 'قيمة الطلبات المسلّمة فقط — بلا shipped/processing.'
+              : 'قيمة طلباتك المسلّمة فقط — بلا shipped/processing.',
+        );
+      },
+    );
+  }
+
   Widget _supKpiCard({
     required String title,
     required double actual,
@@ -586,11 +645,13 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       ),
       child: Text(
         isSupervisor
-            ? 'طريقة العد: الفواتير تشمل جميع الحالات بما فيها الملغاة (دون تغيير في التعريف)؛ '
-                'العملاء بأول دخول ناجح بعد بدء الاحتساب (كل عميل مرة واحدة)؛ الزيارات تشمل المشرف (برمز زيارته إن وُجد) وفريقه؛ '
+            ? 'طريقة العد: الفواتير = عدد مستندات الطلبات (new/delivered/cancelled فقط)؛ '
+                'المبيعات = قيمة المسلّم فقط (بلا shipped/processing)؛ '
+                'العملاء والزيارات من المجمّعين الموحدين الحيّين (مجموع الفريق، مرة واحدة لكل مندوب)؛ '
                 'الساعات للفريق فقط.'
-            : 'طريقة العد: الفواتير تشمل جميع الحالات بما فيها الملغاة (دون تغيير في التعريف)؛ '
-                'العملاء بأول دخول ناجح بعد بدء الاحتساب (كل عميل مرة واحدة).',
+            : 'طريقة العد: الفواتير = عدد مستندات طلباتك (new/delivered/cancelled فقط)؛ '
+                'المبيعات = قيمة المسلّم فقط؛ '
+                'العملاء والزيارات من المجمّعين الموحدين الحيّين لرمز المندوب.',
         style: const TextStyle(fontSize: 11),
       ),
     );

@@ -7,7 +7,7 @@ import 'package:sizer/sizer.dart';
 
 // Supervisor follow-up (aksabsaels, manager view of one supervisor):
 // five team indicators vs the distributed monthly target, real percents,
-// remaining, month switching, supervisor-visits inclusion, team-hours
+// remaining, month switching, team-counter visits (team only), team-hours
 // separation, missing-goal handling.
 void main() {
   String monthKey() {
@@ -53,15 +53,59 @@ void main() {
       'repCode': 'R1',
       'repType': 'permanent',
       'supervisorId': 's1',
+      'clientCounts': {
+        month: {
+          'total': 1,
+          'days': {'2026-11-17': 1},
+        },
+      },
+      // Visit actual comes from the unified counter (R1: 2 this month).
+      'visitsByMonth': {
+        month: {
+          'total': 2,
+          'days': {'2026-11-17': 1},
+        },
+      },
+      // Order actuals come from the unified counter: R1 has 2 docs
+      // (1 delivered + 1 cancelled, value counts the delivered 5000 only).
+      'ordersByMonth': {
+        month: {
+          'new': {'total': 0},
+          'delivered': {'total': 1, 'value': 5000},
+          'cancelled': {'total': 1},
+        },
+      },
     });
     await fake.collection('salesRep').doc('p2').set({
       'fullname': 'مندوب ثان',
       'repCode': 'R2',
       'repType': 'permanent',
       'supervisorId': 's1',
+      'clientCounts': {
+        month: {
+          'total': 1,
+          'days': {'2026-11-17': 1},
+        },
+      },
+      // Visit actual comes from the unified counter (R2: 1 this month).
+      'visitsByMonth': {
+        month: {
+          'total': 1,
+          'days': {'2026-11-17': 1},
+        },
+      },
+      // Order actuals come from the unified counter (R2: 1 delivered doc, nested backend buckets).
+      'ordersByMonth': {
+        month: {
+          'new': {'total': 0},
+          'delivered': {'total': 1, 'value': 4000},
+          'cancelled': {'total': 0},
+        },
+      },
     });
-    // Orders: R1/B1 twice (one cancelled → still counted, documented),
-    // R2/B2 once. Distinct clients = 2, invoices = 3, sales = 12000.
+    // Order docs are line-item details only (kept for the detail report).
+    // KPIs read `ordersByMonth`: team = 3 docs (cancelled counts in the
+    // total, never in the value) → invoices = 3, sales = 9000 delivered-only.
     Future<void> order(String id, String rep, String buyer, double total,
         [String status = 'delivered']) =>
         fake.collection('orders').doc(id).set({
@@ -73,16 +117,8 @@ void main() {
     await order('o1', 'R1', 'B1', 5000);
     await order('o2', 'R1', 'B1', 3000, 'cancelled');
     await order('o3', 'R2', 'B2', 4000);
-    // Visits: 2 (R1) + 1 (R2) + 1 (supervisor's own S1) = 4.
-    Future<void> visit(String id, String rep) =>
-        fake.collection('visits').doc(id).set({
-          'repCode': rep,
-          'startTime': ts(6),
-        });
-    await visit('v1', 'R1');
-    await visit('v2', 'R1');
-    await visit('v3', 'R2');
-    await visit('v4', 'S1');
+    // Visits: team-counter only, 2 (R1) + 1 (R2) = 3. No `visits`
+    // collection reads; supervisor's own S1 visits are not included.
     // Hours: R1 8h + R2 4h = 12 team hours; supervisor's own 5h excluded.
     Future<void> log(String id, String rep, int h) => fake
         .collection('daily_logs')
@@ -134,22 +170,21 @@ void main() {
       expect(find.text('الفعلي حتى اليوم: 12 ساعة'), findsOneWidget);
       expect(find.text('الإنجاز: 12%'), findsOneWidget);
 
-      // Cancelled invoice still counted (documented behavior): 3 invoices,
-      // 2 distinct clients by stable buyer id.
+      // Cancelled doc counts in the invoice total, never in the sales
+      // value: 3 invoices, 2 qualified clients.
       expect(find.text('الفعلي حتى اليوم: 3 فاتورة'), findsOneWidget);
       expect(find.text('الفعلي حتى اليوم: 2 عميل'), findsOneWidget);
 
-      // Supervisor's own visit joins the team total: 4.
-      expect(find.text('الفعلي حتى اليوم: 4 زيارة'), findsOneWidget);
+      // Team-counter total only (supervisor's own visits excluded): 3.
+      expect(find.text('الفعلي حتى اليوم: 3 زيارة'), findsOneWidget);
 
-      // Financial over-achievement shows the real percent.
-      expect(find.text('الفعلي حتى اليوم: 12000 ج.م'), findsOneWidget);
-      expect(find.text('الإنجاز: 120%'), findsOneWidget);
-      expect(find.text('المتبقي: 0 ج.م (تجاوز بـ 2000 ج.م)'),
-          findsOneWidget);
+      // Delivered-only sales vs the 10000 target: 9000 → 90%, 1000 left.
+      expect(find.text('الفعلي حتى اليوم: 9000 ج.م'), findsOneWidget);
+      expect(find.text('الإنجاز: 90%'), findsOneWidget);
+      expect(find.text('المتبقي: 1000 ج.م'), findsOneWidget);
 
       // Counting rules are documented on the page.
-      expect(find.textContaining('الملغاة'), findsOneWidget);
+      expect(find.textContaining('المسلّم'), findsWidgets);
       expect(find.textContaining('الفريق فقط'), findsWidgets);
     });
 
@@ -185,6 +220,21 @@ void main() {
           .collection('managers')
           .doc('s1')
           .update({'targets': targets});
+      // Previous-month order aggregate for R1 (detail doc 'op' is ignored
+      // by the KPIs — same decoy rule as the current month).
+      final p1 = await fake.collection('salesRep').doc('p1').get();
+      final p1data = Map<String, dynamic>.from(p1.data()!);
+      final p1orders =
+          Map<String, dynamic>.from(p1data['ordersByMonth'] as Map);
+      p1orders[prevKey] = {
+        'new': {'total': 0},
+        'delivered': {'total': 1, 'value': 5000},
+        'cancelled': {'total': 0},
+      };
+      await fake
+          .collection('salesRep')
+          .doc('p1')
+          .update({'ordersByMonth': p1orders});
       await fake.collection('orders').doc('op').set({
         'buyer': {'repCode': 'R1', 'id': 'B9'},
         'total': 5000,
@@ -193,7 +243,7 @@ void main() {
       });
 
       await pumpSupervisor(tester, fake, 's1');
-      expect(find.text('الفعلي حتى اليوم: 12000 ج.م'), findsOneWidget);
+      expect(find.text('الفعلي حتى اليوم: 9000 ج.م'), findsOneWidget);
 
       const arabicMonths = [
         'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
@@ -206,9 +256,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.pump(const Duration(milliseconds: 500));
 
-      // Previous-month data only: the one 5000 order, nothing else.
+      // Previous-month data only: the one 5000 aggregate entry.
       expect(find.text('الفعلي حتى اليوم: 5000 ج.م'), findsOneWidget);
-      expect(find.text('الفعلي حتى اليوم: 12000 ج.م'), findsNothing);
+      expect(find.text('الفعلي حتى اليوم: 9000 ج.م'), findsNothing);
     });
   });
 }

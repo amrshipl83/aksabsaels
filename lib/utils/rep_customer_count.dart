@@ -1,4 +1,8 @@
-// First-login customer counting for rep goals (aksabsaels).
+// LEGACY first-login customer counting for rep goals (aksabsaels).
+// Kept for history/tests only. Screens MUST NOT use these users-based
+// helpers for the `clientsTarget` actual anymore: the Single Source of
+// Truth is `salesRep.clientCounts.{YYYY-MM}.total`, read live via
+// lib/utils/client_counts.dart (Cairo month key, one value per repCode).
 //
 // A customer counts toward their rep's `clientsTarget` goal exactly once,
 // when ALL of the following hold:
@@ -114,7 +118,11 @@ int countRepGoalCustomersForTeam({
 
 /// Sums the server-side `clientCounts[monthKey].total` counter across every
 /// matching salesRep doc (robust to duplicate repCode docs: the backend
-/// increments all of them, so the sum is the authoritative total).
+/// increments all of them, so the sum was the authoritative total).
+/// LEGACY/SUPERSEDED: duplicates hold the SAME counter and must be read
+/// ONCE per repCode (see dedupeRepDocsByCode/sumTeamMonthTotal in
+/// lib/utils/client_counts.dart). Kept for history/tests only; screens
+/// must not call this anymore.
 /// Missing months, missing maps, and non-numeric totals contribute 0 —
 /// callers fall back to the live computation when no counter exists at all.
 int sumClientCountsTotal({

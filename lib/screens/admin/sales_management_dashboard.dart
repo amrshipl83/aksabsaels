@@ -5,6 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'dart:convert';
 import 'package:sizer/sizer.dart';
+import '../../utils/client_counts.dart';
+import '../../utils/order_counts.dart';
+import '../../utils/visit_counts.dart';
 import '../../utils/firestore_helpers.dart';
 
 // استيراد الصفحات التابعة
@@ -31,10 +34,10 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
   final Color kBgColor = const Color(0xFFF8F9FD);
   final Color kCardColor = Colors.white;
 
-  int totalOrders = 0;
-  double totalSales = 0;
   int totalAgents = 0;
   int secondaryStat = 0;
+  // Cairo month key for the unified qualified-clients counter stream.
+  final String _counterMonthKey = clientCountMonthKey();
 
   @override
   void initState() {
@@ -103,7 +106,6 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     String myDocId = _userData?['docId'] ?? '';
     if (myDocId.isEmpty) return;
     try {
-      List<String> repCodes = [];
       if (role == 'sales_supervisor') {
         final agentsSnap = await FirebaseFirestore.instance
             .collection('salesRep')
@@ -113,16 +115,10 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
         // Null-safe map access: operator [] throws on legacy docs missing
         // the field; missing type counts as permanent, missing code is ''.
         final eligibleAgents = agentsSnap.docs.where((doc) => isTargetEligible(doc.data()['repType'])).toList();
-        repCodes = eligibleAgents.map((doc) => doc.data()['repCode']?.toString() ?? '').toList();
         totalAgents = eligibleAgents.length;
-
-        if (repCodes.isNotEmpty) {
-           final customersSnap = await FirebaseFirestore.instance
-               .collection('deliverySupermarkets')
-               .where('ownerId', whereIn: repCodes)
-               .get();
-           secondaryStat = customersSnap.size;
-        }
+        // Qualified clients are NOT read here: the supervisor card below
+        // streams the unified `salesRep.clientCounts` counter live.
+        // `deliverySupermarkets` is never a substitute for it.
       } else if (role == 'sales_manager') {
         final supervisorsSnap = await FirebaseFirestore.instance
             .collection('managers')
@@ -132,33 +128,27 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
         List<String> supervisorIds = supervisorsSnap.docs.map((d) => d.id).toList();
         if (supervisorIds.isNotEmpty) {
-          final agentsSnap = await FirebaseFirestore.instance
-              .collection('salesRep')
-              .where('supervisorId', whereIn: supervisorIds)
-              .get();
-          // Tracking is permanent-only (client-side: legacy docs lack repType).
-          // Null-safe map access: operator [] throws on legacy docs missing
-          // the field; missing type counts as permanent, missing code is ''.
-          final eligibleAgents = agentsSnap.docs.where((doc) => isTargetEligible(doc.data()['repType'])).toList();
-          repCodes = eligibleAgents.map((doc) => doc.data()['repCode']?.toString() ?? '').toList();
-          totalAgents = eligibleAgents.length;
+          var count = 0;
+          for (final chunk in chunkList(supervisorIds, 10)) {
+            final agentsSnap = await FirebaseFirestore.instance
+                .collection('salesRep')
+                .where('supervisorId', whereIn: chunk)
+                .get();
+            // Tracking is permanent-only (client-side: legacy docs lack repType).
+            // Null-safe map access: operator [] throws on legacy docs missing
+            // the field; missing type counts as permanent, missing code is ''.
+            count += agentsSnap.docs
+                .where((doc) => isTargetEligible(doc.data()['repType']))
+                .length;
+          }
+          totalAgents = count;
         }
       }
 
-      if (repCodes.isNotEmpty) {
-        final ordersSnap = await FirebaseFirestore.instance
-            .collection('orders')
-            .where('buyer.repCode', whereIn: repCodes)
-            .get();
-        double salesSum = 0;
-        for (var doc in ordersSnap.docs) {
-          salesSum += (doc.data()['total'] ?? 0).toDouble();
-        }
-        setState(() {
-          totalOrders = ordersSnap.size;
-          totalSales = salesSum;
-        });
-      }
+      // الطلبات/المبيعات تُبثّ من المجمّع الموحد
+      // (`salesRep.ordersByMonth.{Cairo month}`) في بطاقتين أدناه —
+      // بلا قراءة `orders` هنا. تفاصيل الطلبات تبقى في شاشة التقارير.
+      setState(() {});
     } catch (e) {
       debugPrint("Firestore Stats Error: $e");
     }
@@ -195,7 +185,9 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
 
     String role = _userData?['role'] ?? '';
     String staffTitle = (role == 'sales_manager') ? "المشرفين والمناديب" : "المناديب";
-    String secondaryStatTitle = (role == 'sales_manager') ? "عدد المشرفين" : "إجمالي العملاء";
+    // Manager card counts supervisors (a different concept, kept as-is).
+    // Supervisor card streams the unified qualified-clients counter.
+    String secondaryStatTitle = (role == 'sales_manager') ? "عدد المشرفين" : "العملاء المؤهلون";
 
     return Scaffold(
       backgroundColor: kBgColor,
@@ -312,10 +304,11 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
                 crossAxisSpacing: 4.w,
                 mainAxisSpacing: 4.w,
                 children: [
-                  _buildStatCard("إجمالي الطلبات", "$totalOrders", Icons.shopping_bag_outlined, const Color(0xFF3498DB)),
-                  _buildStatCard("إجمالي المبيعات", "${totalSales.toInt()}", Icons.account_balance_wallet_outlined, const Color(0xFF2ECC71)),
+                  _buildOrdersStatCard(),
+                  _buildSalesStatCard(),
                   _buildStatCard("عدد المندوبين", "$totalAgents", Icons.groups_2_outlined, const Color(0xFFE67E22)),
-                  _buildStatCard(secondaryStatTitle, "$secondaryStat", Icons.analytics_outlined, const Color(0xFF9B59B6)),
+                  _buildSecondaryStatCard(secondaryStatTitle),
+                  _buildVisitsStatCard(),
                 ],
               ),
               SizedBox(height: 4.h),
@@ -366,6 +359,110 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
           ),
         ],
       ),
+    );
+  }
+
+  /// البطاقة الثانية: مشرف → العملاء المؤهلون من العدّاد الموحد الحي
+  /// (مجموع عدّادات الفريق عبر `supervisorId`). مدير → عدد المشرفين
+  /// (مفهوم إداري مختلف، وليس عدّاد العملاء لذلك يُعرض من الإحصاء المحلي).
+  Widget _buildSecondaryStatCard(String title) {
+    final role = _userData?['role'] ?? '';
+    if (role == 'sales_supervisor') {
+      final myDocId = _userData?['docId'] ?? '';
+      return StreamBuilder<int>(
+        stream: watchSupervisorMonthTotal(
+          db: FirebaseFirestore.instance,
+          supervisorDocId: myDocId,
+          monthKey: _counterMonthKey,
+        ),
+        builder: (context, snapshot) {
+          final value = snapshot.data ?? 0;
+          return _buildStatCard(title, "$value",
+              Icons.analytics_outlined, const Color(0xFF9B59B6));
+        },
+      );
+    }
+    return _buildStatCard(title, "$secondaryStat",
+        Icons.analytics_outlined, const Color(0xFF9B59B6));
+  }
+
+  /// بطاقة الطلبات من المجمّع الموحد (عدد المستندات، Cairo month).
+  /// مشرف → مجموع فريقه، مدير → مجموع هرمه (مرة واحدة لكل مندوب).
+  /// غياب المجمّع = صفر، بلا قراءة `orders`.
+  Widget _buildOrdersStatCard() {
+    final role = _userData?['role'] ?? '';
+    final myDocId = _userData?['docId'] ?? '';
+    final stream = role == 'sales_supervisor'
+        ? watchSupervisorOrderMonthSummary(
+            db: FirebaseFirestore.instance,
+            supervisorDocId: myDocId,
+            monthKey: _counterMonthKey,
+          )
+        : watchManagerOrderMonthSummary(
+            db: FirebaseFirestore.instance,
+            managerDocId: myDocId,
+            monthKey: _counterMonthKey,
+          );
+    return StreamBuilder<OrderMonthSummary>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final value = snapshot.data?.total ?? 0;
+        return _buildStatCard("إجمالي الطلبات", "$value",
+            Icons.shopping_bag_outlined, const Color(0xFF3498DB));
+      },
+    );
+  }
+
+  /// بطاقة المبيعات من المجمّع الموحد (قيمة المسلّم فقط، Cairo month).
+  Widget _buildSalesStatCard() {
+    final role = _userData?['role'] ?? '';
+    final myDocId = _userData?['docId'] ?? '';
+    final stream = role == 'sales_supervisor'
+        ? watchSupervisorOrderMonthSummary(
+            db: FirebaseFirestore.instance,
+            supervisorDocId: myDocId,
+            monthKey: _counterMonthKey,
+          )
+        : watchManagerOrderMonthSummary(
+            db: FirebaseFirestore.instance,
+            managerDocId: myDocId,
+            monthKey: _counterMonthKey,
+          );
+    return StreamBuilder<OrderMonthSummary>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final value = snapshot.data?.deliveredValue ?? 0;
+        return _buildStatCard("إجمالي المبيعات", "${value.toInt()}",
+            Icons.account_balance_wallet_outlined, const Color(0xFF2ECC71));
+      },
+    );
+  }
+
+  /// بطاقة زيارات الفريق من العدّاد الموحد الحي
+  /// (`salesRep.visitsByMonth.{Cairo month}.total`): مشرف → مجموع فريقه
+  /// عبر `supervisorId`، مدير → مجموع هرمه عبر `watchManagerVisitMonthTotal`
+  /// (مرة واحدة لكل مندوب). غياب العداد = صفر، بلا عدّ من `visits`.
+  Widget _buildVisitsStatCard() {
+    final role = _userData?['role'] ?? '';
+    final myDocId = _userData?['docId'] ?? '';
+    final stream = role == 'sales_supervisor'
+        ? watchSupervisorVisitMonthTotal(
+            db: FirebaseFirestore.instance,
+            supervisorDocId: myDocId,
+            monthKey: _counterMonthKey,
+          )
+        : watchManagerVisitMonthTotal(
+            db: FirebaseFirestore.instance,
+            managerDocId: myDocId,
+            monthKey: _counterMonthKey,
+          );
+    return StreamBuilder<int>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final value = snapshot.data ?? 0;
+        return _buildStatCard("زيارات الفريق", "$value",
+            Icons.location_on_outlined, const Color(0xFF2980B9));
+      },
     );
   }
 

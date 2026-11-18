@@ -28,6 +28,36 @@ void main() {
       'repCode': 'R1',
       'repType': 'permanent',
       'supervisorId': 's1',
+      'clientCounts': {
+        month: {
+          'total': 2,
+          'days': {'2026-11-17': 2},
+        },
+      },
+      // Visit actual comes from the unified counter, never from visits docs.
+      'visitsByMonth': {
+        month: {
+          'total': 2,
+          'days': {'2026-11-17': 2},
+        },
+      },
+      // Order actuals come from the unified counter (3 delivered docs, 9000
+      // delivered-only, nested backend buckets), never from `orders` docs.
+      'ordersByMonth': {
+        month: {
+          'new': {'total': 0},
+          'delivered': {
+            'total': 3,
+            'value': 9000,
+            'valueByDay': {
+              '$month-05': 3000,
+              '$month-06': 2000,
+              '$month-07': 4000,
+            },
+          },
+          'cancelled': {'total': 0},
+        },
+      },
       'targets': {
         month: {
           'financialTarget': 8000,
@@ -64,7 +94,9 @@ void main() {
       'repType': 'freelance',
       'supervisorId': 's1',
     });
-    // Orders for R1: B1 twice + B2 once → 3 invoices, 2 clients, 9000.
+    // Order docs are line-item details only (kept for the detail report).
+    // KPIs must read `ordersByMonth` above (3 invoices / 9000), so the
+    // decoy below (o4) must never leak into any indicator.
     await fake.collection('orders').doc('o1').set({
       'buyer': {'repCode': 'R1', 'id': 'B1'},
       'total': 3000,
@@ -83,13 +115,11 @@ void main() {
       'status': 'delivered',
       'orderDate': ts(7),
     });
-    await fake.collection('visits').doc('v1').set({
-      'repCode': 'R1',
-      'startTime': ts(5),
-    });
-    await fake.collection('visits').doc('v2').set({
-      'repCode': 'R1',
-      'startTime': ts(6),
+    await fake.collection('orders').doc('o4').set({
+      'buyer': {'repCode': 'R1', 'id': 'B9'},
+      'total': 99999,
+      'status': 'delivered',
+      'orderDate': ts(8),
     });
     Future<void> log(String id, int h) => fake
         .collection('daily_logs')
