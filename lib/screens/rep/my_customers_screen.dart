@@ -222,6 +222,8 @@ class _MyCustomersScreenState extends State<MyCustomersScreen> {
             child: Column(
               children: [
                 _buildInfoRow(Icons.location_on_outlined, "العنوان", customer['address'] ?? 'غير محدد'),
+                if ((customer['landmark']?.toString().trim().isNotEmpty ?? false))
+                  _buildInfoRow(Icons.place_outlined, "علامة الموقع", customer['landmark']),
                 _buildInfoRow(Icons.calendar_today_outlined, "تاريخ التسجيل", regDate),
                 _buildInfoRow(Icons.map_outlined, "الموقع", _formatLocation(customer['location'])),
               ],

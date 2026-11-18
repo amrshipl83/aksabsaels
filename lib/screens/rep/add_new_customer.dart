@@ -16,6 +16,54 @@ import 'package:aksab_sales/utils/phone_normalize.dart';
 const String kRepBuyerEndpoint =
     'https://us-central1-aksab-erp.cloudfunctions.net/repBuyer';
 
+/// أسباب فشل قراءة الموقع — تُترجم لرسائل مناسبة مع الإبقاء على
+/// القيمة السابقة دائمًا.
+enum LocationFailure {
+  permissionDenied,
+  permissionDeniedForever,
+  serviceDisabled,
+  unavailable,
+}
+
+/// رسالة المستخدم لكل سبب فشل في قراءة الموقع (خالصة، قابلة للاختبار).
+String locationErrorMessage(LocationFailure kind) {
+  switch (kind) {
+    case LocationFailure.permissionDenied:
+      return '❌ تم رفض صلاحية الموقع. فعّلها من إعدادات التطبيق ثم حدّث الموقع.';
+    case LocationFailure.permissionDeniedForever:
+      return '❌ صلاحية الموقع مرفوضة نهائيًا. فعّلها من إعدادات الجهاز، والقيمة السابقة محفوظة.';
+    case LocationFailure.serviceDisabled:
+      return '❌ خدمة الموقع (GPS) متوقفة. فعّلها ثم حدّث الموقع، والقيمة السابقة محفوظة.';
+    case LocationFailure.unavailable:
+      return '⚠️ تعذر تحديد الموقع الحالي. تم الإبقاء على القيمة السابقة.';
+  }
+}
+
+/// جسم طلب إنشاء العميل المُرسل للخادم (خالص، قابل للاختبار).
+/// الإحداثيات هي المرجع الجغرافي الوحيد؛ `landmark` وصف نصي مساعد
+/// يُرسل فقط عند كتابته، ولا يدخل أي حساب جغرافي.
+Map<String, dynamic> buildRepBuyerPayload({
+  required String fullname,
+  required String ownerName,
+  required String phoneNumber,
+  required String requestId,
+  required String address,
+  required String landmark,
+  required double lat,
+  required double lng,
+}) {
+  return {
+    'fullname': fullname,
+    'ownerName': ownerName,
+    'phoneNumber': phoneNumber,
+    'requestId': requestId,
+    'address': address,
+    if (landmark.trim().isNotEmpty) 'landmark': landmark.trim(),
+    'country': 'egypt',
+    'location': {'lat': lat, 'lng': lng},
+  };
+}
+
 class AddNewCustomerScreen extends StatefulWidget {
   const AddNewCustomerScreen({super.key});
 
@@ -31,8 +79,10 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
   final _ownerNameController = TextEditingController(); // اسم صاحب النشاط
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
+  final _landmarkController = TextEditingController();  // علامة مميزة للموقع (اختياري)
 
   bool _isLoading = false;
+  bool _isRefreshingLocation = false;
   Position? _currentPosition;
   // مفتاح عدم التكرار لعملية التسجيل الجارية: يبقى عبر الانقطاع/المهلة،
   // ويُمسح فقط عند نتيجة نهائية (انظر _registerCustomer).
@@ -42,7 +92,7 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
   void initState() {
     super.initState();
     // جلب الموقع فوراً بصمت لاعتباره مأخوذ مسبقاً
-    _determinePosition();
+    _refreshPosition(initial: true);
   }
 
   @override
@@ -51,12 +101,43 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
     _ownerNameController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
+    _landmarkController.dispose();
     super.dispose();
   }
 
-  Future<void> _determinePosition() async {
-    setState(() => _isLoading = true);
+  /// إعادة قراءة الموقع الحالي من الجهاز وتحديث قيمة الموقع فقط —
+  /// لا يمس أي حقل آخر في النموذج. عند أي فشل تُبقى القيمة السابقة
+  /// كما هي مع رسالة مناسبة.
+  Future<void> _refreshPosition({bool initial = false}) async {
+    if (!mounted) return;
+    setState(() {
+      if (initial) {
+        _isLoading = true;
+      } else {
+        _isRefreshingLocation = true;
+      }
+    });
     try {
+      // خدمة الموقع متوقفة: نُبقي القيمة السابقة.
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        _showSnackBar(locationErrorMessage(LocationFailure.serviceDisabled));
+        return;
+      }
+      // صلاحية الموقع: طلبها عند الرفض المؤقت، ورسالة توجيه للإعدادات
+      // عند الرفض النهائي — دون مساس بالقيمة السابقة في الحالتين.
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied) {
+        _showSnackBar(locationErrorMessage(LocationFailure.permissionDenied));
+        return;
+      }
+      if (permission == LocationPermission.deniedForever) {
+        _showSnackBar(
+            locationErrorMessage(LocationFailure.permissionDeniedForever));
+        return;
+      }
       // جلب الإحداثيات مباشرة
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
@@ -70,14 +151,24 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
         address = "${p.street}, ${p.locality}, ${p.subAdministrativeArea}";
       }
 
+      if (!mounted) return;
       setState(() {
         _currentPosition = position;
         _addressController.text = address;
-        _isLoading = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
-      _showSnackBar("⚠️ جاري استخدام نظام الموقع التقريبي: $e");
+      _showSnackBar(
+          "${locationErrorMessage(LocationFailure.unavailable)} ($e)");
+    } finally {
+      if (mounted) {
+        setState(() {
+          if (initial) {
+            _isLoading = false;
+          } else {
+            _isRefreshingLocation = false;
+          }
+        });
+      }
     }
   }
 
@@ -146,18 +237,16 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $idToken',
         },
-        body: jsonEncode({
-          'fullname': _nameController.text.trim(),
-          'ownerName': _ownerNameController.text.trim(),
-          'phoneNumber': cleanPhone,
-          'requestId': _ensureRequestId(),
-          'address': _addressController.text.trim(),
-          'country': 'egypt',
-          'location': {
-            'lat': _currentPosition!.latitude,
-            'lng': _currentPosition!.longitude,
-          },
-        }),
+        body: jsonEncode(buildRepBuyerPayload(
+          fullname: _nameController.text.trim(),
+          ownerName: _ownerNameController.text.trim(),
+          phoneNumber: cleanPhone,
+          requestId: _ensureRequestId(),
+          address: _addressController.text.trim(),
+          landmark: _landmarkController.text,
+          lat: _currentPosition!.latitude,
+          lng: _currentPosition!.longitude,
+        )),
       );
 
       if (response.statusCode == 200) {
@@ -244,7 +333,14 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
                   const SizedBox(height: 15),
                   _buildInput(_phoneController, "رقم هاتف العميل *", Icons.phone_iphone, keyboard: TextInputType.phone),
                   const SizedBox(height: 15),
-                  _buildInput(_addressController, "عنوان الموقع (تلقائي من الـ GPS)", Icons.map_outlined, readOnly: true),
+                  _buildLocationRow(),
+                  const SizedBox(height: 15),
+                  _buildInput(
+                    _landmarkController,
+                    "علامة مميزة للموقع (اختياري)",
+                    Icons.place_outlined,
+                    hint: "بجوار مسجد كذا، أمام الصيدلية",
+                  ),
                   const SizedBox(height: 30),
                   SizedBox(
                     width: double.infinity,
@@ -268,8 +364,52 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
     );
   }
 
+  /// صف الموقع الحالي مع زر التحديث: نفس حقل العنوان للقراءة فقط
+  /// وسلوكه كما هو، وبجانبه زر يطلب الموقع الحالي ويحدّث القيمة فقط.
+  Widget _buildLocationRow() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _buildInput(_addressController,
+              "عنوان الموقع (تلقائي من الـ GPS)", Icons.map_outlined,
+              readOnly: true),
+        ),
+        const SizedBox(width: 8),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF2D9E68).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: const Color(0xFF2D9E68).withValues(alpha: 0.4)),
+            ),
+            child: IconButton(
+              tooltip: 'تحديث الموقع الحالي',
+              onPressed: _isRefreshingLocation || _isLoading
+                  ? null
+                  : () => _refreshPosition(),
+              icon: _isRefreshingLocation
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFF2D9E68),
+                      ),
+                    )
+                  : const Icon(Icons.refresh,
+                      color: Color(0xFF2D9E68)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildInput(TextEditingController controller, String label, IconData icon,
-      {bool readOnly = false, TextInputType keyboard = TextInputType.text}) {
+      {bool readOnly = false, TextInputType keyboard = TextInputType.text, String? hint}) {
     return TextFormField(
       controller: controller,
       readOnly: readOnly,
@@ -278,6 +418,8 @@ class _AddNewCustomerScreenState extends State<AddNewCustomerScreen> {
       decoration: InputDecoration(
         labelText: label,
         labelStyle: const TextStyle(color: Colors.grey, fontFamily: 'Cairo'),
+        hintText: hint,
+        hintStyle: const TextStyle(color: Colors.grey, fontFamily: 'Cairo'),
         prefixIcon: Icon(icon, color: const Color(0xFF2D9E68)),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         focusedBorder: OutlineInputBorder(

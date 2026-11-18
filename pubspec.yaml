@@ -2,8 +2,7 @@ name: aksab_sales
 description: "A specialized Flutter application for Sales Representatives and Managers."
 publish_to: 'none'
 # الإصدار 8 لتخطي أي مسودات سابقة في المتجر
-version: 1.0.2+14
-
+version: 1.0.3+15
 environment:
   sdk: '>=3.2.0 <4.0.0'
 
@@ -55,6 +54,9 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
   fake_cloud_firestore: ^3.1.0
+  # Platform-interface fakes for GPS-dependent widget tests only.
+  geolocator_platform_interface: ^4.1.0
+  geocoding_platform_interface: ^3.0.0
 
 # أيقونة تطبيق المبيعات (تأكد من وجود الملف في assets)
 flutter_launcher_icons:

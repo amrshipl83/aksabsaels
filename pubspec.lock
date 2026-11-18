@@ -526,7 +526,7 @@ packages:
     source: hosted
     version: "3.1.0"
   geocoding_platform_interface:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: geocoding_platform_interface
       sha256: "8c2c8226e5c276594c2e18bfe88b19110ed770aeb7c1ab50ede570be8b92229b"
@@ -558,7 +558,7 @@ packages:
     source: hosted
     version: "2.3.13"
   geolocator_platform_interface:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: geolocator_platform_interface
       sha256: "30cb64f0b9adcc0fb36f628b4ebf4f731a2961a0ebd849f4b56200205056fe67"
