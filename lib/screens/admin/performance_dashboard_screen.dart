@@ -3,9 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:sizer/sizer.dart';
 import '../../utils/client_counts.dart';
 import '../../utils/order_counts.dart';
-import '../../utils/visit_counts.dart';
 import '../../utils/firestore_helpers.dart';
 import '../../utils/target_distribution.dart';
+import '../../utils/workday_history.dart';
 
 class PerformanceDashboardScreen extends StatefulWidget {
   final String targetDocId;
@@ -28,10 +28,15 @@ class PerformanceDashboardScreen extends StatefulWidget {
 }
 
 class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen> {
-  DateTime _startDate = DateTime(cairoNow().year, cairoNow().month, 1);
   bool _isLoading = true;
 
   double workingHours = 0;
+  int workdaysClosed = 0;
+
+  double visitHoursHist = 0;
+
+  int openVisitsHist = 0;
+  int visitsWithoutDurationHist = 0;
   Map<String, dynamic> targets = {};
   bool _repOutsideScope = false;
   // Monthly follow-up state (supervisor branch only).
@@ -57,11 +62,8 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
   @override
   void initState() {
     super.initState();
-    // Supervisor follow-up is month-based: bound the range to the whole
-    // selected month. The rep branch keeps its day-range filter.
-    // Follow-up is month-based for both roles now: bound the range to the
-    // whole selected month.
-    _startDate = DateTime(_selYear, _selMonth, 1);
+    // Follow-up is month-based for both roles: bound the range to the whole
+    // selected month (see monthStart/monthEnd in _fetchData).
     _fetchData();
   }
 
@@ -70,10 +72,15 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     setState(() => _isLoading = true);
 
     try {
-      // Visit totals are NOT read here: the visits card below streams the
-      // unified `salesRep.visitsByMonth.{Cairo month}.total` counter live
-      // (team sum for supervisors, single rep for rep view).
+      // Hours/days are read here from the backend aggregates on the rep doc
+      // (workingHoursByMonth.<month>.totalSeconds/.sessions) — no UI math.
+      // Orders/sales stream from the unified orders aggregate below;
+      // Visit durations come from the `visits` records only.
+      // qualified clients stream from the unified clients counter below.
+
+      // Visit durations come from the `visits` records only.
       List<String> codesToQuery = [];
+      Map<String, Map<String, dynamic>> aggByCode = {};
 
       // 1. تحديد الـ repCodes المستهدفة
       if (widget.targetType == 'sales_supervisor') {
@@ -90,6 +97,8 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
             .where((d) => isTargetEligible(d.data()['repType']))
             .map((d) => d.data()['repCode']?.toString() ?? '')
             .toList();
+        aggByCode =
+            dedupeRepDocsByCode(reps.docs.map((d) => d.data()));
 
         var supervisorDoc = await _db.collection('managers').doc(widget.targetDocId).get();
         final supData = supervisorDoc.data();
@@ -99,6 +108,13 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         codesToQuery = [widget.repCode ?? ''];
         var repDoc = await _db.collection('salesRep').doc(widget.targetDocId).get();
         final repData = repDoc.data();
+        {
+          final code = (repData?['repCode']?.toString() ?? '').trim();
+          if (repData != null) {
+            aggByCode[code.isEmpty ? '__single__' : code] =
+                Map<String, dynamic>.from(repData);
+          }
+        }
         targets = repData?['targets'] ?? {};
         _repOutsideScope = !isTargetEligible(repData?['repType']);
       }
@@ -106,41 +122,51 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
       // الطلبات/المبيعات تُبثّ من المجمّع الموحد
       // (`salesRep.ordersByMonth.{month}`) في بطاقتين مستقلتين أدناه —
       // بلا استعلام `orders` هنا وبلا إعادة حساب. العملاء المؤهلون
-      // والزيارات كذلك من عدّاديهما الموحدين.
+      // من عدّادهم الموحد، والزيارات ومددها من سجلات `visits`، والساعات
+      // والأيام من حقول الدالة الخلفية workingHoursByMonth في مستند المندوب.
       final safeCodes = codesToQuery.where((e) => e.trim().isNotEmpty).toList();
 
+      final monthStart = DateTime(_selYear, _selMonth, 1);
+      final monthEnd = DateTime(_selYear, _selMonth + 1, 1);
       double hours = 0;
+      int wd = 0;
 
+      double vh = 0;
+
+      int ov = 0;
+      int vnodur = 0;
+      // الساعات والأيام: قراءة مباشرة من إجماليات الدالة الخلفية
+      // (workingHoursByMonth.<month>.totalSeconds/.sessions) — بلا تجميع.
+      hours = sumTeamWorkSecondsForMonth(
+              repDataByCode: aggByCode, monthKey: _monthKey) /
+          3600.0;
+      wd = sumTeamWorkSessionsForMonth(
+          repDataByCode: aggByCode, monthKey: _monthKey);
       if (safeCodes.isNotEmpty) {
-        // جلب ساعات العمل — الفريق فقط (أكواد المناديب). ساعات المشرف
-        // الشخصية مستبعدة عمداً وستكون في صفحة الحضور لاحقاً.
-        // مقسّم على دفعات (10 لكل استعلام) بلا اقتطاع.
-        for (final chunk in chunkList(safeCodes, 10)) {
-          var logs = await _db
-              .collection('daily_logs')
-              .where('repCode', whereIn: chunk)
-              .where('startTime',
-                  isGreaterThanOrEqualTo: Timestamp.fromDate(_startDate))
-              .get();
+        final vhist = await fetchTeamVisitSummary(
+          db: _db,
+          repCodes: safeCodes,
+          startInclusive: monthStart,
+          endExclusive: monthEnd,
+        );
 
-          for (var log in logs.docs) {
-            var data = log.data();
-            try {
-              if (data['startTime'] != null && data['endTime'] != null) {
-                DateTime start = (data['startTime'] as Timestamp).toDate();
-                DateTime end = (data['endTime'] as Timestamp).toDate();
-                if (!end.isBefore(start)) {
-                  hours += end.difference(start).inMinutes / 60;
-                }
-              }
-            } catch (_) {}
-          }
-        }
+
+
+        vh = vhist.visitHours;
+
+        ov = vhist.openVisits;
+        vnodur = vhist.visitsWithoutDuration;
       }
 
       if (mounted) {
         setState(() {
           workingHours = hours;
+          workdaysClosed = wd;
+
+          visitHoursHist = vh;
+
+          openVisitsHist = ov;
+          visitsWithoutDurationHist = vnodur;
         });
       }
     } catch (e) {
@@ -196,7 +222,6 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     setState(() {
       _selYear = year;
       _selMonth = month;
-      _startDate = DateTime(year, month, 1);
     });
     _fetchData();
   }
@@ -251,8 +276,8 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
           unit: 'ساعة',
           teamHours: isSupervisor,
           note: isSupervisor
-              ? 'ساعات الفريق فقط — لا تشمل ساعات المشرف الشخصية.'
-              : 'ساعات عملك الشخصية — مرتبطة بالراتب الأساسي.',
+              ? 'إجمالي الدالة الخلفية — ساعات الفريق فقط (totalSeconds) — بلا ساعات المشرف الشخصية.'
+              : 'إجمالي ساعاتك المخزن خلفيًا (totalSeconds) — مرتبط بالراتب الأساسي.',
         ),
         _buildOrdersCounterCard(
           isSupervisor: isSupervisor,
@@ -269,6 +294,20 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         _buildSalesCounterCard(
           isSupervisor: isSupervisor,
           goal: values['financialTarget']!,
+        ),
+        _supKpiCard(
+          title: isSupervisor ? 'أيام العمل المغلقة (الفريق)' : 'أيام عملك المغلقة',
+          actual: workdaysClosed.toDouble(),
+          goal: 0,
+          unit: 'يوم',
+          note: 'إجمالي الجلسات المحتسبة خلفيًا (sessions) — بلا تجميع في الواجهة.',
+        ),
+        _supKpiCard(
+          title: isSupervisor ? 'إجمالي مدة الزيارات (الفريق)' : 'إجمالي مدة زياراتك',
+          actual: visitHoursHist,
+          goal: 0,
+          unit: 'ساعة',
+          note: 'من السجلات التاريخية (الحالات النهائية ذات المدة الصالحة) — $openVisitsHist مفتوحة و$visitsWithoutDurationHist بلا مدة مستبعدة من المدد.',
         ),
         _buildCountingNote(isSupervisor: isSupervisor),
       ],
@@ -426,21 +465,21 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
     );
   }
 
-  /// بطاقة الزيارات من العدّاد الموحد (بث حي، Cairo month key).
-  /// مشرف: مجموع عدّادات الفريق عبر `supervisorId` (مرة واحدة لكل
-  /// مندوب، مقسّم على دفعات بلا اقتطاع). مندوب: عدّاد `repCode` وحده.
-  /// غياب العداد = صفر، بلا عدّ من مجموعة `visits`.
+  /// بطاقة الزيارات من السجلات التاريخية (نطاق الشهر على `visits`).
+  /// مشرف: مجموع سجلات الفريق عبر `supervisorId` (مرة واحدة لكل
+  /// مندوب، مقسّم على دفعات بلا اقتطاع). مندوب: سجلات `repCode` وحده.
+  /// المفتوحة (in_progress) مستبعدة؛ بلا مدة مخترعة للسجلات القديمة.
   Widget _buildVisitsCounterCard({
     required bool isSupervisor,
     required double goal,
   }) {
     final stream = isSupervisor
-        ? watchSupervisorVisitMonthTotal(
+        ? watchSupervisorVisitMonthTotalHist(
             db: _db,
             supervisorDocId: widget.targetDocId,
             monthKey: _monthKey,
           )
-        : watchRepVisitMonthTotal(
+        : watchRepVisitMonthTotalHist(
             db: _db,
             repCode: widget.repCode ?? '',
             monthKey: _monthKey,
@@ -455,8 +494,8 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
           goal: goal,
           unit: 'زيارة',
           note: isSupervisor
-              ? 'إجمالي الفريق من العدّاد الموحد الحي (بتوقيت القاهرة) — بلا إعادة حساب.'
-              : 'زياراتك من العدّاد الموحد الحي (بتوقيت القاهرة) — بلا إعادة حساب.',
+              ? 'إجمالي الفريق من السجلات التاريخية (الحالات النهائية فقط — المفتوح مستبعد).'
+              : 'زياراتك من السجلات التاريخية (الحالات النهائية فقط — المفتوح مستبعد).',
         );
       },
     );
@@ -647,14 +686,13 @@ class _PerformanceDashboardScreenState extends State<PerformanceDashboardScreen>
         isSupervisor
             ? 'طريقة العد: الفواتير = عدد مستندات الطلبات (new/delivered/cancelled فقط)؛ '
                 'المبيعات = قيمة المسلّم فقط (بلا shipped/processing)؛ '
-                'العملاء والزيارات من المجمّعين الموحدين الحيّين (مجموع الفريق، مرة واحدة لكل مندوب)؛ '
+                'الساعات وأيام العمل من حقول الدالة الخلفية (workingHoursByMonth: totalSeconds/sessions)؛ الزيارات ومددها من سجلات `visits` (المغلق فقط)؛ العملاء من المجمّع الموحد الحي؛ '
                 'الساعات للفريق فقط.'
             : 'طريقة العد: الفواتير = عدد مستندات طلباتك (new/delivered/cancelled فقط)؛ '
                 'المبيعات = قيمة المسلّم فقط؛ '
-                'العملاء والزيارات من المجمّعين الموحدين الحيّين لرمز المندوب.',
+                'الساعات وأيام العمل من حقول الدالة الخلفية (workingHoursByMonth)؛ الزيارات ومددها من سجلات `visits` (المغلق فقط)؛ العملاء من المجمّع الموحد الحي.',
         style: const TextStyle(fontSize: 11),
       ),
     );
   }
-
 }

@@ -6,8 +6,8 @@ import 'package:intl/intl.dart';
 import '../../utils/firestore_helpers.dart';
 import '../../utils/client_counts.dart';
 import '../../utils/order_counts.dart';
-import '../../utils/visit_counts.dart';
 import '../../utils/target_distribution.dart';
+import '../../utils/workday_history.dart';
 
 class GoalsScreen extends StatefulWidget {
   const GoalsScreen({super.key});
@@ -73,8 +73,10 @@ class _GoalsScreenState extends State<GoalsScreen> {
   bool _accessDenied = false;
   // Qualified clients for clientsTarget: Single Source of Truth is the
   // live `salesRep.clientCounts.{Cairo YYYY-MM}.total` counter (streamed
-  // below). Other achieved metrics keep their existing sources untouched.
+  // below). Hours/workdays/visits come from the historical records
+  // (daily_logs + visits) — same source as the admin board.
   String _repCodeForCounter = '';
+  int _histWorkdays = 0;
   String _monthKey = '';
   DateTime? _firstDay;
   DateTime? _lastDay;
@@ -138,20 +140,26 @@ class _GoalsScreenState extends State<GoalsScreen> {
       // (watchRepMonthTotal) — بلا إعادة حساب من `users` وبلا fallback.
       // يُخزّن repCode ومفتاح الشهر هنا ويُبث الرقم في البطاقة أدناه.
       final repCodeForCounter = repCode?.toString() ?? '';
-      // 3. جلب ساعات العمل من daily_logs
+      // 3. ساعات العمل وأيام العمل من السجلات التاريخية (أيام مغلقة فقط).
+      final lastDayExclusive = DateTime(cairo.year, cairo.month + 1, 1);
       final logsSnap = await FirebaseFirestore.instance
           .collection('daily_logs')
           .where('repCode', isEqualTo: repCode)
-          .where('startTime', isGreaterThanOrEqualTo: firstDay)
+          .where('startTime', isGreaterThanOrEqualTo: firstDay).where('startTime', isLessThan: lastDayExclusive)
           .get();
 
       double hours = 0;
+      int histWorkdays = 0;
       for (var doc in logsSnap.docs) {
         var log = doc.data();
-        if (log['startTime'] != null && log['endTime'] != null) {
+        if (log['status'] == 'closed' && log['startTime'] is Timestamp && log['endTime'] is Timestamp) {
           DateTime start = (log['startTime'] as Timestamp).toDate();
           DateTime end = (log['endTime'] as Timestamp).toDate();
-          hours += end.difference(start).inMinutes / 60.0;
+          final mins = end.difference(start).inMinutes / 60.0;
+          if (!mins.isNegative) {
+            hours += mins;
+            histWorkdays++;
+          }
         }
       }
 
@@ -159,8 +167,9 @@ class _GoalsScreenState extends State<GoalsScreen> {
         // المالي/الفواتير يُبثّان من المجمّع الموحد أدناه (عدد المستندات
         // وقيمة المسلّم فقط) — بلا قراءة `orders` هنا.
         _stats['workingHours'] = hours;
+        _histWorkdays = histWorkdays;
         // Visits are NOT counted from daily_logs here: the visitsTarget
-        // card below streams `salesRep.visitsByMonth.{Cairo month}.total`.
+        // card below streams the historical `visits` records for the month.
         _repCodeForCounter = repCodeForCounter;
         _monthKey = monthKey;
         _firstDay = firstDay;
@@ -173,7 +182,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
     }
   }
 
-  /// المحقق الحالي لكل حقل: الساعات من `daily_logs` فقط.
+  /// المحقق الحالي لكل حقل: الساعات من `daily_logs` (المغلقة فقط).
   /// المالي (قيمة المسلّم) والفواتير (عدد المستندات) والزيارات والعملاء
   /// تُبثّ من المجمّعات الموحدة في بطاقات مستقلة أدناه، لذا تُعيد
   /// هذه الدالة null لها هنا.
@@ -207,7 +216,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
       return clientCountMonthKey();
     }
     final fmt = DateFormat('d/M/yyyy');
-    return '$_monthKey • من ${fmt.format(_firstDay!)} إلى ${fmt.format(_lastDay!)}';
+    return '$_monthKey • من ${fmt.format(_firstDay!)} إلى ${fmt.format(_lastDay!)} • أيام مغلقة: $_histWorkdays';
   }
 
   @override
@@ -381,8 +390,8 @@ class _GoalsScreenState extends State<GoalsScreen> {
   }
 
   /// بطاقة هدف واحدة. المالي (قيمة المسلّم) والفواتير (عدد المستندات)
-  /// والزيارات والعملاء يُمرَّر محققها من المجمّعات الموحدة الحيّة عبر
-  /// [actualOverride]؛ الساعات فقط من `_achievedFor`.
+  /// والعملاء تُمرَّر من المجمّعات الموحدة الحيّة، والزيارات من السجلات
+  /// التاريخية عبر [actualOverride]؛ الساعات فقط من `_achievedFor`.
   Widget _goalCardFor(String field) {
     if (field == 'clientsTarget') return _buildClientsCounterCard();
     if (field == 'visitsTarget') return _buildVisitsCounterCard();
@@ -435,16 +444,16 @@ class _GoalsScreenState extends State<GoalsScreen> {
     );
   }
 
-  /// بطاقة الزيارات من العدّاد الموحد (بث حي، Cairo month key).
-  /// الإجمالي من `visitsByMonth.{month}.total` — بلا عدّ من `visits`
-  /// أو `daily_logs` وبلا fallback.
+  /// بطاقة الزيارات من السجلات التاريخية (بث حي، نطاق الشهر).
+  /// الإجمالي من سجلات `visits` (الحالات النهائية فقط) — بلا عدّادات
+  /// المفتوحة (in_progress) مستبعدة — نفس مصدر لوحة الأدمن.
   Widget _buildVisitsCounterCard() {
     const field = 'visitsTarget';
     if (_repCodeForCounter.isEmpty || _monthKey.isEmpty) {
       return _buildGoalCard(field, actualOverride: 0);
     }
     return StreamBuilder<int>(
-      stream: watchRepVisitMonthTotal(
+      stream: watchRepVisitMonthTotalHist(
         db: FirebaseFirestore.instance,
         repCode: _repCodeForCounter,
         monthKey: _monthKey,

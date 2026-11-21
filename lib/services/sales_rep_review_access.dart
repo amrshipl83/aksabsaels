@@ -27,16 +27,17 @@ class SalesRepReviewAccess {
 
   /// الأرقام الثلاثة بصيغتها المحلية (11 رقمًا).
   static const List<String> reviewPhones = [
-    '01021070462', // مندوب sales_rep
-    '01021070461', // مشرف sales_supervisor
-    '01021070463', // مدير sales_manager
+    '01021070461', // مندوب sales_rep (مؤكد إنتاجيًا: مستند salesRep)
+    '01021070462', // مشرف sales_supervisor (مؤكد إنتاجيًا: مستند managers)
+    '01021070463', // مدير sales_manager (مؤكد إنتاجيًا: مستند managers)
   ];
 
   /// الدور المتوقع لكل رقم (للفحص والتوثيق؛ الدور الفعلي يُقرأ دائمًا
   /// من مستند Firestore بعد الدخول ولا يُمنح من التطبيق).
+  /// مطابقة الإنتاج 2026-11-21: 461 مندوب، 462 مشرف، 463 مدير.
   static const Map<String, String> reviewRoles = {
-    '01021070462': 'sales_rep',
-    '01021070461': 'sales_supervisor',
+    '01021070461': 'sales_rep',
+    '01021070462': 'sales_supervisor',
     '01021070463': 'sales_manager',
   };
 

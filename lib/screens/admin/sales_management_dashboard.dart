@@ -7,7 +7,8 @@ import 'dart:convert';
 import 'package:sizer/sizer.dart';
 import '../../utils/client_counts.dart';
 import '../../utils/order_counts.dart';
-import '../../utils/visit_counts.dart';
+// (visits now from workday_history; counter import removed)
+import '../../utils/workday_history.dart';
 import '../../utils/firestore_helpers.dart';
 
 // استيراد الصفحات التابعة
@@ -438,20 +439,20 @@ class _SalesManagementDashboardState extends State<SalesManagementDashboard> {
     );
   }
 
-  /// بطاقة زيارات الفريق من العدّاد الموحد الحي
-  /// (`salesRep.visitsByMonth.{Cairo month}.total`): مشرف → مجموع فريقه
-  /// عبر `supervisorId`، مدير → مجموع هرمه عبر `watchManagerVisitMonthTotal`
-  /// (مرة واحدة لكل مندوب). غياب العداد = صفر، بلا عدّ من `visits`.
+  /// بطاقة زيارات الفريق من السجلات التاريخية (الحالات النهائية فقط)
+  /// (نطاق الشهر على سجلات `visits`): مشرف → مجموع فريقه
+  /// عبر `supervisorId`، مدير → مجموع هرمه عبر `watchManagerVisitMonthTotalHist`
+  /// (مرة واحدة لكل مندوب). المفتوحة (in_progress) مستبعدة — نفس مصدر الأداء.
   Widget _buildVisitsStatCard() {
     final role = _userData?['role'] ?? '';
     final myDocId = _userData?['docId'] ?? '';
     final stream = role == 'sales_supervisor'
-        ? watchSupervisorVisitMonthTotal(
+        ? watchSupervisorVisitMonthTotalHist(
             db: FirebaseFirestore.instance,
             supervisorDocId: myDocId,
             monthKey: _counterMonthKey,
           )
-        : watchManagerVisitMonthTotal(
+        : watchManagerVisitMonthTotalHist(
             db: FirebaseFirestore.instance,
             managerDocId: myDocId,
             monthKey: _counterMonthKey,

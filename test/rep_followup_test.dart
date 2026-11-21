@@ -8,6 +8,9 @@ import 'package:sizer/sizer.dart';
 // Rep monthly follow-up (aksabsaels): the rep's five indicators vs the
 // share distributed by their supervisor, same layout rules as the
 // supervisor page (goal / actual / real percent / remaining, no fake 0%).
+// Work/history actuals (hours, workdays, visits, visit durations) come from
+// the historical records (daily_logs + visits) — same source as the admin
+// board. Open/incomplete records are excluded, never counted.
 void main() {
   String monthKey() {
     final now = DateTime.now();
@@ -34,12 +37,17 @@ void main() {
           'days': {'2026-11-17': 2},
         },
       },
-      // Visit actual comes from the unified counter, never from visits docs.
+      // Historical visits live in the `visits` collection (see seed below).
       'visitsByMonth': {
         month: {
           'total': 2,
           'days': {'2026-11-17': 2},
         },
+      },
+      // Backend work aggregates (working_hours_performance): the admin board
+      // reads these fields directly — never recomputed in the UI.
+      'workingHoursByMonth': {
+        month: {'totalSeconds': 28800, 'sessions': 2},
       },
       // Order actuals come from the unified counter (3 delivered docs, 9000
       // delivered-only, nested backend buckets), never from `orders` docs.
@@ -87,6 +95,14 @@ void main() {
       'repType': 'permanent',
       'supervisorId': 's1',
     });
+    // Rep with closed daily_logs but NO backend aggregates: proves the
+    // board shows the stored totals (0/0) instead of recomputing logs.
+    await fake.collection('salesRep').doc('p4').set({
+      'fullname': 'مندوب بلا تجميع',
+      'repCode': 'R4',
+      'repType': 'permanent',
+      'supervisorId': 's1',
+    });
     // Freelance rep (out of scope badge).
     await fake.collection('salesRep').doc('f1').set({
       'fullname': 'مندوب حر',
@@ -126,11 +142,52 @@ void main() {
         .doc(id)
         .set({
           'repCode': 'R1',
+          'status': 'closed',
+          'closedBy': 'rep',
           'startTime': Timestamp.fromDate(DateTime.now()
               .subtract(Duration(hours: h + 1))),
           'endTime': Timestamp.fromDate(
               DateTime.now().subtract(const Duration(hours: 1))),
         });
+    // Historical visits: 2 closed visits (30 min each) for R1.
+    Future<void> visit(String id, int h, int mins) => fake
+        .collection('visits')
+        .doc(id)
+        .set({
+          'repCode': 'R1',
+          'status': 'sold',
+          'startTime': Timestamp.fromDate(
+              DateTime.now().subtract(Duration(hours: h))),
+          'endTime': Timestamp.fromDate(DateTime.now().subtract(
+              Duration(hours: h) - Duration(minutes: mins))),
+        });
+    await visit('v1', 7, 30);
+    await visit('v2', 3, 30);
+    Future<void> logFor(String id, String rep, int h) => fake
+        .collection('daily_logs')
+        .doc(id)
+        .set({
+          'repCode': rep,
+          'status': 'closed',
+          'closedBy': 'rep',
+          'startTime': Timestamp.fromDate(DateTime.now()
+              .subtract(Duration(hours: h + 1))),
+          'endTime': Timestamp.fromDate(
+              DateTime.now().subtract(const Duration(hours: 1))),
+        });
+    Future<void> visitFor(String id, String rep, int h, int mins) => fake
+        .collection('visits')
+        .doc(id)
+        .set({
+          'repCode': rep,
+          'status': 'sold',
+          'startTime': Timestamp.fromDate(
+              DateTime.now().subtract(Duration(hours: h))),
+          'endTime': Timestamp.fromDate(DateTime.now().subtract(
+              Duration(hours: h) - Duration(minutes: mins))),
+        });
+    await logFor('l4', 'R4', 6);
+    await visitFor('v4', 'R4', 3, 30);
     await log('l1', 6);
     await log('l2', 2);
     return fake;
@@ -166,6 +223,8 @@ void main() {
 
       expect(find.text('كود المندوب: R1'), findsOneWidget);
       expect(find.text('الفعلي حتى اليوم: 8 ساعة'), findsOneWidget);
+      expect(find.text('الفعلي حتى اليوم: 2 يوم'), findsOneWidget);
+      expect(find.text('الفعلي حتى اليوم: 1 ساعة'), findsOneWidget);
       // 20% twice: hours (8/40) and clients (2/10) — same percent, both real.
       expect(find.text('الإنجاز: 20%'), findsNWidgets(2));
       expect(find.text('الفعلي حتى اليوم: 3 فاتورة'), findsOneWidget);
@@ -184,7 +243,7 @@ void main() {
       await pumpRep(tester, fake, 'p2', 'مندوب قديم', 'R2');
       expect(find.text('الهدف: 5000 ج.م'), findsOneWidget);
       expect(find.text('الهدف: 20 زيارة'), findsOneWidget);
-      expect(find.textContaining('لم يُحدد هدف'), findsNWidgets(3));
+      expect(find.textContaining('لم يُحدد هدف'), findsNWidgets(5));
       expect(find.textContaining('الإنجاز:'), findsNWidgets(2));
     });
 
@@ -192,8 +251,20 @@ void main() {
         (tester) async {
       final fake = await seed();
       await pumpRep(tester, fake, 'p3', 'مندوب بلا هدف', 'R3');
-      expect(find.textContaining('لم يُحدد هدف'), findsNWidgets(5));
+      expect(find.textContaining('لم يُحدد هدف'), findsNWidgets(7));
       expect(find.textContaining('الإنجاز:'), findsNothing);
+    });
+
+    testWidgets('shows stored backend totals, never recomputes daily_logs',
+        (tester) async {
+      final fake = await seed();
+      await pumpRep(tester, fake, 'p4', 'مندوب بلا تجميع', 'R4');
+      // l4 is a closed 6h day, but the rep doc carries no backend
+      // aggregates — the board must show zeros, not 6h/1d.
+      expect(find.text('الفعلي حتى اليوم: 0 ساعة'), findsOneWidget);
+      expect(find.text('الفعلي حتى اليوم: 0 يوم'), findsOneWidget);
+      // The historical visit still counts (visits source is untouched).
+      expect(find.text('الفعلي حتى اليوم: 1 زيارة'), findsOneWidget);
     });
 
     testWidgets('freelance rep gets the out-of-scope badge', (tester) async {

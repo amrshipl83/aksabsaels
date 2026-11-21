@@ -59,12 +59,16 @@ void main() {
           'days': {'2026-11-17': 1},
         },
       },
-      // Visit actual comes from the unified counter (R1: 2 this month).
+      // Historical visits live in the `visits` collection (see seed below).
       'visitsByMonth': {
         month: {
           'total': 2,
           'days': {'2026-11-17': 1},
         },
+      },
+      // Backend work aggregates: the board reads these directly (8h/1 session).
+      'workingHoursByMonth': {
+        month: {'totalSeconds': 28800, 'sessions': 1},
       },
       // Order actuals come from the unified counter: R1 has 2 docs
       // (1 delivered + 1 cancelled, value counts the delivered 5000 only).
@@ -87,12 +91,16 @@ void main() {
           'days': {'2026-11-17': 1},
         },
       },
-      // Visit actual comes from the unified counter (R2: 1 this month).
+      // Historical visits live in the `visits` collection (see seed below).
       'visitsByMonth': {
         month: {
           'total': 1,
           'days': {'2026-11-17': 1},
         },
+      },
+      // Backend work aggregates: the board reads these directly (4h/1 session).
+      'workingHoursByMonth': {
+        month: {'totalSeconds': 14400, 'sessions': 1},
       },
       // Order actuals come from the unified counter (R2: 1 delivered doc, nested backend buckets).
       'ordersByMonth': {
@@ -117,19 +125,35 @@ void main() {
     await order('o1', 'R1', 'B1', 5000);
     await order('o2', 'R1', 'B1', 3000, 'cancelled');
     await order('o3', 'R2', 'B2', 4000);
-    // Visits: team-counter only, 2 (R1) + 1 (R2) = 3. No `visits`
-    // collection reads; supervisor's own S1 visits are not included.
+    // Visits: historical only, 2 (R1) + 1 (R2) = 3 closed visits.
+    // supervisor's own S1 visits are not included. Each visit is 40 min.
     // Hours: R1 8h + R2 4h = 12 team hours; supervisor's own 5h excluded.
     Future<void> log(String id, String rep, int h) => fake
         .collection('daily_logs')
         .doc(id)
         .set({
           'repCode': rep,
+          'status': 'closed',
+          'closedBy': 'rep',
           'startTime': Timestamp.fromDate(DateTime.now().subtract(
               Duration(hours: h + 1))),
           'endTime': Timestamp.fromDate(
               DateTime.now().subtract(const Duration(hours: 1))),
         });
+    Future<void> visit(String id, String rep, int h) => fake
+        .collection('visits')
+        .doc(id)
+        .set({
+          'repCode': rep,
+          'status': 'sold',
+          'startTime': Timestamp.fromDate(
+              DateTime.now().subtract(Duration(hours: h))),
+          'endTime': Timestamp.fromDate(DateTime.now().subtract(
+              Duration(hours: h) - const Duration(minutes: 40))),
+        });
+    await visit('v1', 'R1', 7);
+    await visit('v2', 'R1', 3);
+    await visit('v3', 'R2', 5);
     await log('l1', 'R1', 8);
     await log('l2', 'R2', 4);
     await log('l3', 'S1', 5);
@@ -168,6 +192,8 @@ void main() {
 
       // Team hours exclude the supervisor's own 5h log.
       expect(find.text('الفعلي حتى اليوم: 12 ساعة'), findsOneWidget);
+      expect(find.text('الفعلي حتى اليوم: 2 يوم'), findsOneWidget);
+      expect(find.text('الفعلي حتى اليوم: 2 ساعة'), findsOneWidget);
       expect(find.text('الإنجاز: 12%'), findsOneWidget);
 
       // Cancelled doc counts in the invoice total, never in the sales
@@ -192,7 +218,7 @@ void main() {
         (tester) async {
       final fake = await seed();
       await pumpSupervisor(tester, fake, 's2', 'مشرف بلا هدف');
-      expect(find.textContaining('لم يُحدد هدف'), findsNWidgets(5));
+      expect(find.textContaining('لم يُحدد هدف'), findsNWidgets(7));
       expect(find.textContaining('الإنجاز:'), findsNothing);
     });
   });

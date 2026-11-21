@@ -3,7 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../utils/client_counts.dart';
 import '../../utils/order_counts.dart';
-import '../../utils/visit_counts.dart';
+// (visits now from workday_history; counter import removed)
+import '../../utils/workday_history.dart';
 
 class SalesRepDashboard extends StatefulWidget {
   final String repCode;
@@ -31,15 +32,15 @@ class _SalesRepDashboardState extends State<SalesRepDashboard> {
     monthKey: _monthKey,
     dayKey: _dayKey,
   );
-  // Visits from the unified counter: today from `days`, month total
-  // from `total` — never recomputed from the `visits` collection.
-  late final Stream<int> _todayVisits = watchRepVisitDayTotal(
+  // Visits from the historical `visits` records: today from the day range,
+  // month total from the month range — same source as the admin board.
+  late final Stream<int> _todayVisits = watchRepVisitDayTotalHist(
     db: FirebaseFirestore.instance,
     repCode: widget.repCode,
     monthKey: _monthKey,
     dayKey: _dayKey,
   );
-  late final Stream<int> _monthVisits = watchRepVisitMonthTotal(
+  late final Stream<int> _monthVisits = watchRepVisitMonthTotalHist(
     db: FirebaseFirestore.instance,
     repCode: widget.repCode,
     monthKey: _monthKey,
@@ -84,9 +85,9 @@ class _SalesRepDashboardState extends State<SalesRepDashboard> {
     );
   }
 
-  /// زيارات اليوم من العدّاد الموحد
-  /// (`salesRep.visitsByMonth.{Cairo month}.days.{Cairo day}`) — بث حي،
-  /// مع إجمالي الشهر من `total` كعنوان فرعي. ليست عدًّا من مجموعة `visits`.
+  /// زيارات اليوم من السجلات التاريخية (الحالات النهائية فقط)
+  /// (نطاق اليوم/الشهر على `visits`) — بث حي، نفس مصدر لوحة الأدمن.
+  /// مع إجمالي الشهر من نطاق الشهر كعنوان فرعي. المفتوحة مستبعدة.
   Widget _buildTodayVisitsCard() {
     const title = 'الزيارات';
     const color = Colors.blue;

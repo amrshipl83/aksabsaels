@@ -70,14 +70,35 @@ void main() {
     });
 
     test('each review number maps to its documented role and collection', () {
-      expect(SalesRepReviewAccess.reviewRoles['01021070462'], 'sales_rep');
-      expect(SalesRepReviewAccess.reviewRoles['01021070461'], 'sales_supervisor');
+      // Production-verified 2026-11-21: 461 is the sales rep (salesRep),
+      // 462 the supervisor and 463 the manager (both managers).
+      expect(SalesRepReviewAccess.reviewRoles['01021070461'], 'sales_rep');
+      expect(SalesRepReviewAccess.reviewRoles['01021070462'], 'sales_supervisor');
       expect(SalesRepReviewAccess.reviewRoles['01021070463'], 'sales_manager');
       expect(SalesRepReviewAccess.expectedCollection('sales_rep'), 'salesRep');
       expect(
           SalesRepReviewAccess.expectedCollection('sales_supervisor'), 'managers');
       expect(
           SalesRepReviewAccess.expectedCollection('sales_manager'), 'managers');
+    });
+
+    test('each review number resolves to its own collection (no mixing)', () {
+      // 461 must read the rep collection used by the normal rep login path;
+      // supervisor/manager numbers must stay on the managers collection.
+      for (final entry in SalesRepReviewAccess.reviewRoles.entries) {
+        final resolved =
+            SalesRepReviewAccess.expectedCollection(entry.value);
+        if (entry.key == '01021070461') {
+          expect(resolved, 'salesRep');
+        } else {
+          expect(resolved, 'managers');
+        }
+      }
+      // The rep collection and the managers collection never overlap here.
+      expect(
+          SalesRepReviewAccess.expectedCollection(
+              SalesRepReviewAccess.reviewRoles['01021070461']!),
+          isNot('managers'));
     });
   });
 }
