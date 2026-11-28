@@ -1,16 +1,14 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'RepTraderOffersScreen.dart';
 import '../../utils/geo_areas.dart';
-
-typedef Coordinates = AreaPoint;
+import '../../utils/offer_pricing.dart';
+import '../../utils/rep_location.dart';
 
 class RepTradersLiteScreen extends StatefulWidget {
-  final Position? initialPosition;
-  const RepTradersLiteScreen({super.key, this.initialPosition});
+  const RepTradersLiteScreen({super.key});
 
   @override
   State<RepTradersLiteScreen> createState() => _RepTradersLiteScreenState();
@@ -25,8 +23,13 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
   List<String> _categories = [];
   bool _isLoading = true;
 
-  Coordinates? _currentPosition;
-  Map<String, List<List<Coordinates>>> _areaCoordinatesMap = {};
+  // Unified rep position (newest visit by startTime, else workday start).
+  // null = unknown location: only global sellers are shown, never guesses.
+  double? _repLat;
+  double? _repLng;
+  bool _repHasFix = false;
+  Map<String, List<List<AreaPoint>>> _areaCoordinatesMap = {};
+  Map<String, GeoBBox> _areaBoxes = {};
 
   @override
   void initState() {
@@ -38,15 +41,18 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     await _fetchAndProcessGeoJson();
-    if (widget.initialPosition != null) {
-      _currentPosition = Coordinates(lat: widget.initialPosition!.latitude, lng: widget.initialPosition!.longitude);
-    } else {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
-        Position pos = await Geolocator.getCurrentPosition();
-        _currentPosition = Coordinates(lat: pos.latitude, lng: pos.longitude);
+    _areaBoxes = buildAreaBBoxes(_areaCoordinatesMap);
+    try {
+      final repCode = await readStoredRepCode();
+      if (repCode != null && repCode.isNotEmpty) {
+        final point = await fetchUnifiedRepPoint(_db, repCode);
+        if (point != null) {
+          _repLat = point.lat;
+          _repLng = point.lng;
+          _repHasFix = true;
+        }
       }
-    }
+    } catch (_) {}
     await _loadTraders();
     if (mounted) setState(() => _isLoading = false);
   }
@@ -60,19 +66,49 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
     } catch (e) { debugPrint("GeoJSON Error: $e"); }
   }
 
+  /// Supplier list filtered like BUYER TradersScreen:
+  /// 1. sellers with at least one active, geo-visible productOffer win;
+  /// 2. if that offers read fails, fall back to the seller's own coverage
+  ///    (empty zones = global; unknown location = globals only).
+  /// Identity is the seller document id only — never the name.
   Future<void> _loadTraders() async {
     try {
+      Set<String> visibleIds = {};
+      var offersCheckOk = false;
+      try {
+        final offersSnap = await _db
+            .collection('productOffers')
+            .where('status', isEqualTo: 'active')
+            .get();
+        visibleIds = visibleOfferSellerIdsByCoords(
+          // Priced offers only (mirrors BUYER traders_screen): a seller
+          // with no purchasable offer must not appear in the store.
+          offerDocs: offersSnap.docs
+              .map((d) => d.data() as Map<String, dynamic>)
+              .where(hasPricedOfferDoc),
+          lat: _repLat,
+          lng: _repLng,
+          areaPolygons: _areaCoordinatesMap,
+          bboxes: _areaBoxes,
+        );
+        offersCheckOk = true;
+      } catch (e) {
+        debugPrint('Traders offers gate unavailable: $e');
+      }
       final snapshot = await _db.collection("sellers").where("status", isEqualTo: "active").get();
       List<DocumentSnapshot> availableSellers = [];
       for (var doc in snapshot.docs) {
-        final data = doc.data();
-        final dynamic deliveryAreas = data['deliveryAreas'];
-        if (offerCoversLocation(
-          deliveryAreas: deliveryAreas,
-          lat: _currentPosition?.lat,
-          lng: _currentPosition?.lng,
+        if (offersCheckOk) {
+          if (visibleIds.contains(doc.id)) availableSellers.add(doc);
+          continue;
+        }
+        final data = doc.data() as Map<String, dynamic>;
+        if (isOfferVisibleByCoords(
+          offerData: data,
+          lat: _repLat,
+          lng: _repLng,
           areaPolygons: _areaCoordinatesMap,
-          showWhenLocationUnknown: true,
+          bboxes: _areaBoxes,
         )) {
           availableSellers.add(doc);
         }
@@ -121,6 +157,7 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
         body: SafeArea(
           child: Column(
             children: [
+              if (!_repHasFix && !_isLoading) _buildNoLocationBanner(),
               _buildSearchBox(),
               _buildCategoryFilter(),
               Expanded(
@@ -141,14 +178,37 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
     );
   }
 
+  Widget _buildNoLocationBanner() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.amber.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.location_off_outlined, color: Colors.amber.shade800),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text("تعذر تحديد موقعك — يُعرض الموردون العامون فقط.",
+                style: TextStyle(fontSize: 13, color: Colors.black87)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSearchBox() {
     return Padding(
       padding: const EdgeInsets.all(12),
       child: TextField(
         onChanged: (v) { _searchQuery = v; _applyFilters(); },
         decoration: InputDecoration(
-          hintText: "بحث باسم المورد...", 
-          prefixIcon: const Icon(Icons.search), 
+          hintText: "بحث باسم المورد...",
+          prefixIcon: const Icon(Icons.search),
           filled: true,
           fillColor: Colors.white,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
@@ -168,7 +228,7 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
           Padding(
             padding: const EdgeInsets.only(left: 8),
             child: ActionChip(
-              label: const Text("الكل"), 
+              label: const Text("الكل"),
               onPressed: () { setState(() => _currentFilter = 'all'); _applyFilters(); },
               backgroundColor: _currentFilter == 'all' ? const Color(0xFF43B97F) : Colors.white,
               labelStyle: TextStyle(color: _currentFilter == 'all' ? Colors.white : Colors.black),
@@ -177,7 +237,7 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
           ..._categories.map((c) => Padding(
             padding: const EdgeInsets.only(left: 8),
             child: ActionChip(
-              label: Text(c), 
+              label: Text(c),
               onPressed: () { setState(() => _currentFilter = c); _applyFilters(); },
               backgroundColor: _currentFilter == c ? const Color(0xFF43B97F) : Colors.white,
               labelStyle: TextStyle(color: _currentFilter == c ? Colors.white : Colors.black),
@@ -203,7 +263,7 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
       child: InkWell(
         borderRadius: BorderRadius.circular(15),
         onTap: () => Navigator.push(
-          context, 
+          context,
           MaterialPageRoute(builder: (context) => RepTraderOffersScreen(sellerId: doc.id, sellerName: name))
         ),
         child: Padding(
@@ -257,4 +317,3 @@ class _RepTradersLiteScreenState extends State<RepTradersLiteScreen> {
     );
   }
 }
-

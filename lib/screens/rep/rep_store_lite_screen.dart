@@ -88,9 +88,9 @@ class _RepStoreLiteScreenState extends State<RepStoreLiteScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => RepTradersLiteScreen(
-          // نمرر الموقع الحالي لصفحة التجار عشان متعملش فحص تاني
-          initialPosition: _userPosition, 
+        builder: (context) => const RepTradersLiteScreen( // unified rep position resolved inside
+          // الموقع الموحد يُحسم داخل شاشة التجار (لا GPS حي هنا)
+          /* unified rep position resolved inside */ 
         ),
       ),
     );
